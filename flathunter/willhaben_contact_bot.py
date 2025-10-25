@@ -150,32 +150,6 @@ class WillhabenContactBot:
         print("✓ Cookies loaded")
         return True
 
-    def is_logged_in(self):
-        """
-        Check if the user is actually logged in by looking for login indicators
-        Returns True if logged in, False otherwise
-        """
-        try:
-            # Refresh the page to apply cookies
-            self.driver.refresh()
-            time.sleep(2)
-
-            # Look for "Anmelden" (Login) button - if present, user is NOT logged in
-            login_buttons = self.driver.find_elements(By.LINK_TEXT, "Anmelden")
-            if login_buttons and len(login_buttons) > 0:
-                print("✗ Not logged in - 'Anmelden' button found")
-                return False
-
-            # Alternative: look for user menu or logged-in indicators
-            # You might need to adjust this based on willhaben's actual UI
-            print("✓ Appears to be logged in")
-            return True
-
-        except Exception as e:
-            print(f"  (Could not verify login status: {e})")
-            # If we can't verify, assume we're logged in and let it fail later
-            return True
-    
     def login_manual(self):
         """
         Open login page and wait for user to login manually
@@ -235,23 +209,12 @@ class WillhabenContactBot:
         try:
             print(f"\n→ Opening listing: {listing_url}")
             self.driver.get(listing_url)
-            self._random_delay(0.5, 1)  # Reduced
+            self._random_delay(0.5, 1)
 
-            # Check if we got redirected to a login page or if session expired
-            current_url = self.driver.current_url
-            if 'sso.willhaben.at' in current_url or 'login' in current_url.lower():
-                print("✗ Redirected to login page - session expired!")
-                raise SessionExpiredException("Session expired - redirected to login page")
-
-            # Check if "Anmelden" button is present (indicates not logged in)
-            try:
-                login_button = self.driver.find_element(By.LINK_TEXT, "Anmelden")
-                if login_button:
-                    print("✗ 'Anmelden' button found - session expired!")
-                    raise SessionExpiredException("Session expired - login button found on page")
-            except NoSuchElementException:
-                # No login button found, good - we're logged in
-                pass
+            # Quick check if we got redirected to login page (basically free)
+            if 'sso.willhaben.at' in self.driver.current_url:
+                print("✗ Session expired - redirected to login")
+                raise SessionExpiredException("Session expired")
 
             # Wait for the contact form to appear
             wait = WebDriverWait(self.driver, 10)
@@ -283,13 +246,6 @@ class WillhabenContactBot:
                     print("  (Found private listing form)")
                 except Exception as e:
                     print(f"  (Could not find messaging form: {str(e)})")
-                    # Double-check if we're logged in before raising generic error
-                    try:
-                        login_check = self.driver.find_element(By.LINK_TEXT, "Anmelden")
-                        if login_check:
-                            raise SessionExpiredException("Session expired - contact form not found and login button present")
-                    except NoSuchElementException:
-                        pass
                     raise Exception("Could not find contact form")
             
             # If it's an email form (company listing), check the boxes
