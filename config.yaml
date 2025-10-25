@@ -221,3 +221,11 @@ slack:
 # (F12) go to the "Network" tab, then "Cookies" and copy the value of the
 # "reese84" cookie.
 immoscout_cookie: ''
+
+# WG-Gesucht auto-contact configuration
+# Enable automatic contacting of WG-Gesucht listings
+wg_gesucht_auto_contact: true
+# Template index to use (0-based, must match saved templates)
+wg_gesucht_template_index: 0
+# Run browser in headless mode
+wg_gesucht_headless: true
