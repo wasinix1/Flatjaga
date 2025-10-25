@@ -22,23 +22,27 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0):
         """
         Initialize the bot with Chrome WebDriver
-        
+
         Args:
             headless: Run Chrome in headless mode (no visible browser)
+            delay_min: Minimum delay between actions in seconds
+            delay_max: Maximum delay between actions in seconds
         """
         self.options = webdriver.ChromeOptions()
-        
+        self.delay_min = delay_min
+        self.delay_max = delay_max
+
         if headless:
             self.options.add_argument('--headless')
-        
+
         # Make it look more like a real browser
         self.options.add_argument('--disable-blink-features=AutomationControlled')
         self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
         self.options.add_experimental_option('useAutomationExtension', False)
-        
+
         self.driver = None
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
         self.contacted_file = Path.home() / '.willhaben_contacted.json'
@@ -57,8 +61,17 @@ class WillhabenContactBot:
         with open(self.contacted_file, 'w') as f:
             json.dump(list(self.contacted_listings), f)
     
-    def _random_delay(self, min_sec=0.5, max_sec=2.0):
-        """Add a random delay to simulate human behavior"""
+    def _random_delay(self, min_sec=None, max_sec=None):
+        """Add a random delay to simulate human behavior
+
+        Args:
+            min_sec: Minimum delay in seconds (uses self.delay_min if not specified)
+            max_sec: Maximum delay in seconds (uses self.delay_max if not specified)
+        """
+        if min_sec is None:
+            min_sec = self.delay_min
+        if max_sec is None:
+            max_sec = self.delay_max
         time.sleep(random.uniform(min_sec, max_sec))
     
     def accept_cookies(self):

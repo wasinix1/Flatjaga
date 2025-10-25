@@ -32,7 +32,9 @@ class WgGesuchtContactProcessor:
         self.enabled = config.get('wg_gesucht_auto_contact', False)
         self.template_index = config.get('wg_gesucht_template_index', 0)
         self.headless = config.get('wg_gesucht_headless', True)
-        
+        self.delay_min = config.get('wg_gesucht_delay_min', 0.5)
+        self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
+
         logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled})")
     
     def _init_bot(self):
@@ -44,19 +46,21 @@ class WgGesuchtContactProcessor:
             return False
         
         try:
-            logger.info("Starting WG-Gesucht bot...")
+            logger.info(f"Starting WG-Gesucht bot (delays={self.delay_min}-{self.delay_max}s)...")
             self.bot = WgGesuchtContactBot(
                 headless=self.headless,
-                template_index=self.template_index
+                template_index=self.template_index,
+                delay_min=self.delay_min,
+                delay_max=self.delay_max
             )
-            
+
             if not self.bot.session_valid:
                 logger.error(
                     "WG-Gesucht session not valid. "
                     "Run standalone test to login first."
                 )
                 return False
-            
+
             self.bot_ready = True
             logger.info("✓ WG-Gesucht bot ready")
             return True

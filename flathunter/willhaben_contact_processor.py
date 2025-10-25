@@ -110,8 +110,17 @@ class WillhabenContactProcessor:
             return True
 
         try:
-            logger.info("Starting willhaben contact bot (headless)...")
-            self.bot = WillhabenContactBot(headless=True)
+            # Get config values with defaults
+            headless = self.config.get('willhaben_headless', True)
+            delay_min = self.config.get('willhaben_delay_min', 0.5)
+            delay_max = self.config.get('willhaben_delay_max', 2.0)
+
+            logger.info(f"Starting willhaben contact bot (headless={headless}, delays={delay_min}-{delay_max}s)...")
+            self.bot = WillhabenContactBot(
+                headless=headless,
+                delay_min=delay_min,
+                delay_max=delay_max
+            )
             self.bot.start()
 
             if not self.bot.load_cookies():
