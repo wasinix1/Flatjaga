@@ -4,7 +4,7 @@ Detects browser crashes and restarts automatically
 """
 
 from flathunter.logging import logger
-from willhaben_contact_bot import WillhabenContactBot
+from willhaben_contact_bot import WillhabenContactBot, SessionExpiredException
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
 import json
@@ -22,6 +22,7 @@ class WillhabenContactProcessor:
         self.total_contacted = 0
         self.total_errors = 0
         self.telegram_notifier = telegram_notifier
+        self.session_expired_notified = False  # Only notify once per session
 
         # Setup failure log file
         self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
@@ -72,6 +73,30 @@ class WillhabenContactProcessor:
         except Exception as e:
             logger.error(f"Failed to send failure notification: {e}")
 
+    def _send_session_expired_notification(self):
+        """Send special notification for expired session with re-login instructions"""
+        if not self.telegram_notifier or self.session_expired_notified:
+            return
+
+        try:
+            expired_message = (
+                f"🔐 WILLHABEN SESSION ABGELAUFEN 🔐\n\n"
+                f"Die Willhaben-Login-Cookies sind abgelaufen!\n\n"
+                f"Bitte neu einloggen:\n"
+                f"1. Führe aus: python willhaben_contact_bot.py\n"
+                f"2. Logge dich manuell im Browser ein\n"
+                f"3. Die Session wird automatisch gespeichert\n\n"
+                f"Der Bot wird KEINE weiteren Listings kontaktieren bis du dich neu einloggst.\n\n"
+                f"Gesamt Fehler: {self.total_errors}"
+            )
+
+            self.telegram_notifier.notify(expired_message)
+            self.session_expired_notified = True
+            logger.warning("Sent session expired notification")
+
+        except Exception as e:
+            logger.error(f"Failed to send session expired notification: {e}")
+
     def _is_browser_dead(self, error):
         """Check if error indicates browser crash"""
         error_str = str(error).lower()
@@ -108,23 +133,31 @@ class WillhabenContactProcessor:
         """Lazy init the selenium bot"""
         if self.bot_ready:
             return True
-        
+
         try:
             logger.info("Starting willhaben contact bot (headless)...")
             self.bot = WillhabenContactBot(headless=True)
             self.bot.start()
-            
+
             if not self.bot.load_cookies():
                 logger.warning(
                     "No willhaben session found. "
                     "Run 'python willhaben_contact_bot.py' to login first."
                 )
                 return False
-            
+
+            # Verify that cookies are still valid and user is logged in
+            logger.info("Verifying login status...")
+            if not self.bot.is_logged_in():
+                logger.error("Session cookies expired - user is not logged in")
+                # Send notification about expired session
+                self._send_session_expired_notification()
+                return False
+
             self.bot_ready = True
             logger.info(f"✓ Willhaben bot ready (stats: {self.total_contacted} contacted, {self.total_errors} errors)")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to start willhaben bot: {e}")
             return False
@@ -167,7 +200,26 @@ class WillhabenContactProcessor:
                 
                 # Success - break out of retry loop
                 break
-                
+
+            except SessionExpiredException as e:
+                elapsed = time.time() - start_time
+                self.total_errors += 1
+                error_msg = f"Session expired ({elapsed:.1f}s): {e}"
+                logger.error(error_msg)
+                expose['_auto_contacted'] = False
+
+                # Log failure with special category
+                self._log_failure_to_file(expose, str(e), "session_expired")
+
+                # Send special session expired notification (only once)
+                self._send_session_expired_notification()
+
+                # Stop processing - session is expired, no point in retrying
+                # Mark bot as not ready so it won't try other listings
+                self.bot_ready = False
+                logger.error("Session expired - stopping all contact attempts until re-login")
+                break
+
             except (InvalidSessionIdException, WebDriverException) as e:
                 elapsed = time.time() - start_time
 
