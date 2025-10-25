@@ -22,12 +22,14 @@ class Hunter:
             raise ConfigException(
                 "Invalid config for hunter - should be a 'Config' object")
         self.id_watch = id_watch
-        self.willhaben_processor = WillhabenContactProcessor(config)
 
-        # Initialize telegram notifier for success notifications
+        # Initialize telegram notifier for success/failure notifications
         self.telegram_notifier = None
         if 'telegram' in self.config.notifiers():
             self.telegram_notifier = SenderTelegram(self.config)
+
+        # Initialize willhaben processor with telegram notifier
+        self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier)
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a willhaben listing is successfully contacted"""

@@ -7,19 +7,71 @@ from flathunter.logging import logger
 from willhaben_contact_bot import WillhabenContactBot
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
+import json
+from pathlib import Path
+from datetime import datetime
 
 
 class WillhabenContactProcessor:
     """Processor that auto-contacts willhaben listings - with crash recovery"""
-    
-    def __init__(self, config):
+
+    def __init__(self, config, telegram_notifier=None):
         self.config = config
         self.bot = None
         self.bot_ready = False
         self.total_contacted = 0
         self.total_errors = 0
+        self.telegram_notifier = telegram_notifier
+
+        # Setup failure log file
+        self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
+
         logger.info("Willhaben auto-contact processor initialized (with auto-recovery)")
-    
+
+    def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
+        """Log contact failure to file with timestamp and details"""
+        try:
+            failure_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "url": expose.get('url', 'N/A'),
+                "title": expose.get('title', 'N/A'),
+                "error_type": error_type,
+                "error_message": str(error_message),
+                "total_errors": self.total_errors
+            }
+
+            # Append to JSONL file (one JSON object per line)
+            with open(self.failure_log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(failure_entry, ensure_ascii=False) + '\n')
+
+            logger.debug(f"Logged failure to {self.failure_log_file}")
+
+        except Exception as e:
+            logger.error(f"Failed to log failure to file: {e}")
+
+    def _send_failure_notification(self, expose, error_message):
+        """Send Telegram notification when contact fails"""
+        if not self.telegram_notifier:
+            return
+
+        try:
+            title = expose.get('title', 'Unknown listing')
+            url = expose.get('url', '')
+
+            failure_message = (
+                f"⚠️ KONTAKT FEHLGESCHLAGEN ⚠️\n\n"
+                f"Listing: {title}\n"
+                f"URL: {url}\n"
+                f"Fehler: {error_message[:200]}\n\n"
+                f"Gesamt Fehler: {self.total_errors}"
+            )
+
+            self.telegram_notifier.notify(failure_message)
+            logger.info(f"Sent failure notification for: {title}")
+
+        except Exception as e:
+            logger.error(f"Failed to send failure notification: {e}")
+
     def _is_browser_dead(self, error):
         """Check if error indicates browser crash"""
         error_str = str(error).lower()
@@ -118,11 +170,12 @@ class WillhabenContactProcessor:
                 
             except (InvalidSessionIdException, WebDriverException) as e:
                 elapsed = time.time() - start_time
-                
+
                 if self._is_browser_dead(e):
                     self.total_errors += 1
-                    logger.error(f"Browser crashed ({elapsed:.1f}s)")
-                    
+                    error_msg = f"Browser crashed ({elapsed:.1f}s)"
+                    logger.error(error_msg)
+
                     # Try to restart browser and retry
                     if attempt < max_retries - 1:
                         if self._restart_bot():
@@ -130,21 +183,36 @@ class WillhabenContactProcessor:
                         else:
                             logger.error("Failed to restart browser - giving up")
                             expose['_auto_contacted'] = False
+                            # Log failure and notify on final failure
+                            self._log_failure_to_file(expose, "Failed to restart browser", "browser_crash")
+                            self._send_failure_notification(expose, "Browser abgestürzt und Neustart fehlgeschlagen")
                             break
                     else:
                         logger.error("Max retries reached - giving up on this listing")
                         expose['_auto_contacted'] = False
+                        # Log failure and notify
+                        self._log_failure_to_file(expose, "Max retries reached after browser crash", "browser_crash_max_retries")
+                        self._send_failure_notification(expose, "Browser abgestürzt - maximale Wiederholungen erreicht")
                 else:
                     # Some other WebDriver error
-                    logger.error(f"WebDriver error ({elapsed:.1f}s): {e}")
+                    self.total_errors += 1
+                    error_msg = f"WebDriver error ({elapsed:.1f}s): {e}"
+                    logger.error(error_msg)
                     expose['_auto_contacted'] = False
+                    # Log failure and notify
+                    self._log_failure_to_file(expose, str(e), "webdriver_error")
+                    self._send_failure_notification(expose, f"WebDriver Fehler: {str(e)[:100]}")
                     break
-                    
+
             except Exception as e:
                 elapsed = time.time() - start_time
                 self.total_errors += 1
-                logger.error(f"Unexpected error ({elapsed:.1f}s): {e}")
+                error_msg = f"Unexpected error ({elapsed:.1f}s): {e}"
+                logger.error(error_msg)
                 expose['_auto_contacted'] = False
+                # Log failure and notify
+                self._log_failure_to_file(expose, str(e), "unexpected_error")
+                self._send_failure_notification(expose, f"Unerwarteter Fehler: {str(e)[:100]}")
                 break
         
         return expose
