@@ -65,7 +65,7 @@ class WillhabenContactBot:
         """Accept cookie banner if it appears - optimized for speed"""
         try:
             # Brief moment for banner to appear
-            time.sleep(0.2)
+            time.sleep(random.uniform(0.1, 0.3))
 
             # Find all buttons on page
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
@@ -132,7 +132,7 @@ class WillhabenContactBot:
 
         # Need to visit the domain first before adding cookies
         self.driver.get('https://www.willhaben.at')
-        time.sleep(0.3)  # Brief wait for domain to load
+        self._random_delay(0.2, 0.5)
 
         with open(self.cookies_file, 'r') as f:
             cookies = json.load(f)
@@ -252,7 +252,7 @@ class WillhabenContactBot:
                     EC.presence_of_element_located((By.ID, "contactSuggestions-6"))
                 )
                 self.driver.execute_script("arguments[0].click();", viewing_checkbox)
-                time.sleep(0.1)  # Minimal delay for checkbox state update
+                self._random_delay(0.1, 0.2)
 
                 # Check if Mietprofil checkbox exists and is enabled
                 try:
@@ -260,7 +260,7 @@ class WillhabenContactBot:
                     if mietprofil_checkbox.is_enabled():
                         print("→ Checking 'Mietprofil teilen' box...")
                         self.driver.execute_script("arguments[0].click();", mietprofil_checkbox)
-                        time.sleep(0.1)
+                        self._random_delay(0.1, 0.2)
                 except NoSuchElementException:
                     print("  (Mietprofil checkbox not available)")
 
@@ -279,7 +279,7 @@ class WillhabenContactBot:
                         # Add a simple message (you can customize this)
                         message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
                         message_textarea.send_keys(message_text)
-                        time.sleep(0.15)  # Brief delay after typing
+                        self._random_delay(0.1, 0.3)
                 except:
                     pass
                 
@@ -304,7 +304,7 @@ class WillhabenContactBot:
             print(f"→ About to submit form via button: '{submit_button.text}'")
             print(f"  (Button testid: {submit_button.get_attribute('data-testid')})")
 
-            time.sleep(0.2)  # Minimal delay before submit
+            self._random_delay(0.2, 0.4)  # Small delay before submit
 
             # Try clicking the button normally first (not JavaScript) to trigger proper form validation
             try:
@@ -316,12 +316,12 @@ class WillhabenContactBot:
                 self.driver.execute_script("arguments[0].click();", submit_button)
                 print("✓ Button clicked (JavaScript)!")
 
-            time.sleep(0.6)  # Wait for form submission
+            self._random_delay(0.5, 0.8)  # Wait for form submission
 
             # Privacy popup appears after clicking submit - accept it
             print("→ Accepting privacy popup...")
             self.accept_privacy_popup()
-            time.sleep(0.2)  # Brief wait after popup
+            self._random_delay(0.1, 0.3)
             
             # Check for success message
             print("→ Waiting for confirmation...")
