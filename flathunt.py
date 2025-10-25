@@ -6,6 +6,8 @@
 
 import time
 from datetime import time as dtime
+from pathlib import Path
+import json
 
 from flathunter.argument_parser import parse
 from flathunter.logging import logger, configure_logging
@@ -20,6 +22,57 @@ __version__ = "1.0"
 __maintainer__ = "Nody"
 __email__ = "harrymcfly@protonmail.com"
 __status__ = "Production"
+
+
+def check_saved_sessions():
+    """Check for saved sessions and prompt user for confirmation"""
+    sessions_found = []
+
+    # Check for willhaben session
+    willhaben_cookies = Path.home() / '.willhaben_cookies.json'
+    if willhaben_cookies.exists():
+        try:
+            with open(willhaben_cookies, 'r') as f:
+                cookies = json.load(f)
+                # Try to extract username or email if available in cookies
+                user_info = "saved session"
+                for cookie in cookies:
+                    if cookie.get('name') in ['username', 'email', 'user']:
+                        user_info = cookie.get('value', user_info)
+                        break
+                sessions_found.append(('willhaben', willhaben_cookies, user_info))
+        except:
+            # If we can't read the file, just show that it exists
+            sessions_found.append(('willhaben', willhaben_cookies, 'saved session'))
+
+    # If no sessions found, just continue
+    if not sessions_found:
+        return
+
+    # Show saved sessions and prompt
+    print("\n" + "="*60)
+    print("SAVED SESSIONS FOUND")
+    print("="*60)
+    for service, path, info in sessions_found:
+        print(f"  • {service.upper()}: {info}")
+    print("="*60)
+    print("\nPress ENTER to use saved session(s), or 'x' to switch account: ", end='', flush=True)
+
+    response = input().strip().lower()
+
+    if response == 'x':
+        print("\nClearing saved sessions...")
+        for service, path, _ in sessions_found:
+            try:
+                path.unlink()
+                print(f"  ✓ Cleared {service} session")
+            except Exception as e:
+                logger.error(f"Failed to clear {service} session: {e}")
+        print("\nYou can now login with a different account.")
+        print("Run 'python willhaben_contact_bot.py' to setup a new session.\n")
+        return
+    else:
+        print("Using saved session(s)...\n")
 
 
 def launch_flat_hunt(config, heartbeat: Heartbeat):
@@ -90,6 +143,9 @@ def main():
     if len(config.target_urls()) == 0:
         logger.error("No URLs configured. Starting like this would be pointless...")
         return
+
+    # check for saved sessions and prompt user
+    check_saved_sessions()
 
     # get heartbeat instructions
     heartbeat_interval = args.heartbeat
