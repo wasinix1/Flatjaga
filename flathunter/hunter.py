@@ -11,6 +11,7 @@ from flathunter.captcha.captcha_solver import CaptchaUnsolvableError
 from flathunter.exceptions import ConfigException
 
 from flathunter.willhaben_contact_processor import WillhabenContactProcessor
+from flathunter.wg_gesucht_contact_processor import WgGesuchtContactProcessor
 from flathunter.notifiers import SenderTelegram
 
 class Hunter:
@@ -30,6 +31,9 @@ class Hunter:
 
         # Initialize willhaben processor with telegram notifier
         self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier)
+
+        # Initialize wg-gesucht processor
+        self.wg_gesucht_processor = WgGesuchtContactProcessor(config)
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a willhaben listing is successfully contacted"""
@@ -84,6 +88,9 @@ class Hunter:
         for expose in processor_chain.process(self.crawl_for_exposes(max_pages)):
             # Contact willhaben BEFORE logging/notifying
             expose = self.willhaben_processor.process_expose(expose)
+
+            # Contact wg-gesucht BEFORE logging/notifying
+            expose = self.wg_gesucht_processor.process_expose(expose)
 
             # Send success notification if listing was successfully contacted
             if expose.get('_auto_contacted'):

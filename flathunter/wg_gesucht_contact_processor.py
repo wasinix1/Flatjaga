@@ -96,12 +96,10 @@ class WgGesuchtContactProcessor:
             
             if success:
                 logger.info("✓ Successfully contacted")
-                expose['contacted'] = True
-                expose['contact_platform'] = 'wg_gesucht'
+                expose['_auto_contacted'] = True
             else:
                 logger.warning("⚠️  Failed to contact listing")
-                expose['contacted'] = False
-                expose['contact_failed'] = True
+                expose['_auto_contacted'] = False
                 
                 # If session became invalid, stop trying
                 if not self.bot.session_valid:
@@ -110,8 +108,7 @@ class WgGesuchtContactProcessor:
         
         except Exception as e:
             logger.error(f"Error contacting WG-Gesucht listing: {e}")
-            expose['contacted'] = False
-            expose['contact_error'] = str(e)
+            expose['_auto_contacted'] = False
         
         return expose
     
