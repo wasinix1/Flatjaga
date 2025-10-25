@@ -16,6 +16,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 
+class SessionExpiredException(Exception):
+    """Raised when willhaben session has expired and re-login is needed"""
+    pass
+
+
 class WillhabenContactBot:
     def __init__(self, headless=False):
         """
@@ -59,12 +64,12 @@ class WillhabenContactBot:
     def accept_cookies(self):
         """Accept cookie banner if it appears - optimized for speed"""
         try:
-            # Give page a moment to load, then immediately grab all buttons
-            time.sleep(0.5)
-            
+            # Brief moment for banner to appear
+            time.sleep(random.uniform(0.1, 0.3))
+
             # Find all buttons on page
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
-            
+
             # Look for cookie accept button by text
             for button in buttons:
                 try:
@@ -72,11 +77,10 @@ class WillhabenContactBot:
                     if any(word in button_text for word in ['akzeptieren', 'accept', 'zustimmen', 'agree', 'alle']):
                         button.click()
                         print("✓ Cookies accepted")
-                        time.sleep(0.3)
                         return True
                 except:
                     continue
-                    
+
             print("  (No cookie banner found)")
             return False
         except Exception as e:
@@ -86,8 +90,6 @@ class WillhabenContactBot:
     def accept_privacy_popup(self):
         """Accept the 'Zu deiner Sicherheit' privacy popup if it appears - optimized"""
         try:
-            time.sleep(0.3)  # Brief pause
-            
             # Look for "Ja, ich stimme zu" button
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
             for button in buttons:
@@ -95,11 +97,10 @@ class WillhabenContactBot:
                     if "ja, ich stimme zu" in button.text.lower():
                         button.click()
                         print("✓ Privacy popup accepted")
-                        time.sleep(0.3)
                         return True
                 except:
                     continue
-                    
+
             print("  (No privacy popup)")
             return False
         except Exception as e:
@@ -128,23 +129,23 @@ class WillhabenContactBot:
         """Load cookies from file to resume session"""
         if not self.cookies_file.exists():
             return False
-        
+
         # Need to visit the domain first before adding cookies
         self.driver.get('https://www.willhaben.at')
-        self._random_delay()
-        
+        self._random_delay(0.2, 0.5)
+
         with open(self.cookies_file, 'r') as f:
             cookies = json.load(f)
-        
+
         for cookie in cookies:
             # Selenium doesn't like some cookie fields
             if 'expiry' in cookie:
                 cookie['expiry'] = int(cookie['expiry'])
             self.driver.add_cookie(cookie)
-        
+
         print("✓ Cookies loaded")
         return True
-    
+
     def login_manual(self):
         """
         Open login page and wait for user to login manually
@@ -204,16 +205,20 @@ class WillhabenContactBot:
         try:
             print(f"\n→ Opening listing: {listing_url}")
             self.driver.get(listing_url)
-            self._random_delay(0.5, 1)  # Reduced
-            
+
+            # Quick check if we got redirected to login page (basically free)
+            if 'sso.willhaben.at' in self.driver.current_url:
+                print("✗ Session expired - redirected to login")
+                raise SessionExpiredException("Session expired")
+
             # Wait for the contact form to appear
             wait = WebDriverWait(self.driver, 10)
-            
+
             # Find the contact form - could be either email form or messaging form
             print("→ Looking for contact form...")
             form_found = False
             form_type = None
-            
+
             # Try to find email form (company listings)
             try:
                 wait.until(
@@ -224,7 +229,7 @@ class WillhabenContactBot:
                 print("  (Found company listing form)")
             except:
                 pass
-            
+
             # Try to find messaging form (private listings)
             if not form_found:
                 try:
@@ -247,18 +252,18 @@ class WillhabenContactBot:
                     EC.presence_of_element_located((By.ID, "contactSuggestions-6"))
                 )
                 self.driver.execute_script("arguments[0].click();", viewing_checkbox)
-                self._random_delay(0.3, 0.8)
-                
+                self._random_delay(0.1, 0.2)
+
                 # Check if Mietprofil checkbox exists and is enabled
                 try:
                     mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
                     if mietprofil_checkbox.is_enabled():
                         print("→ Checking 'Mietprofil teilen' box...")
                         self.driver.execute_script("arguments[0].click();", mietprofil_checkbox)
-                        self._random_delay(0.3, 0.8)
+                        self._random_delay(0.1, 0.2)
                 except NoSuchElementException:
                     print("  (Mietprofil checkbox not available)")
-                
+
                 # Find and click the email submit button
                 print("→ Clicking email submit button...")
                 submit_button = wait.until(
@@ -274,7 +279,7 @@ class WillhabenContactBot:
                         # Add a simple message (you can customize this)
                         message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
                         message_textarea.send_keys(message_text)
-                        self._random_delay(0.3, 0.8)
+                        self._random_delay(0.1, 0.3)
                 except:
                     pass
                 
@@ -298,10 +303,9 @@ class WillhabenContactBot:
             # Click whichever button we found
             print(f"→ About to submit form via button: '{submit_button.text}'")
             print(f"  (Button testid: {submit_button.get_attribute('data-testid')})")
-            
-            # Add a small delay before clicking
-            self._random_delay(0.8, 1.5)
-            
+
+            self._random_delay(0.2, 0.4)  # Small delay before submit
+
             # Try clicking the button normally first (not JavaScript) to trigger proper form validation
             try:
                 submit_button.click()
@@ -311,13 +315,13 @@ class WillhabenContactBot:
                 print("  (Normal click failed, trying JavaScript...)")
                 self.driver.execute_script("arguments[0].click();", submit_button)
                 print("✓ Button clicked (JavaScript)!")
-            
-            self._random_delay(1, 2)  # Longer delay after click to let form submit
-            
+
+            self._random_delay(0.5, 0.8)  # Wait for form submission
+
             # Privacy popup appears after clicking submit - accept it
             print("→ Accepting privacy popup...")
             self.accept_privacy_popup()
-            self._random_delay(0.5, 1)  # Reduced
+            self._random_delay(0.1, 0.3)
             
             # Check for success message
             print("→ Waiting for confirmation...")

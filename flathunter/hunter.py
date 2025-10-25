@@ -11,6 +11,7 @@ from flathunter.captcha.captcha_solver import CaptchaUnsolvableError
 from flathunter.exceptions import ConfigException
 
 from flathunter.willhaben_contact_processor import WillhabenContactProcessor
+from flathunter.notifiers import SenderTelegram
 
 class Hunter:
     """Basic methods for crawling and processing / filtering exposes"""
@@ -21,7 +22,31 @@ class Hunter:
             raise ConfigException(
                 "Invalid config for hunter - should be a 'Config' object")
         self.id_watch = id_watch
-        self.willhaben_processor = WillhabenContactProcessor(config)
+
+        # Initialize telegram notifier for success/failure notifications
+        self.telegram_notifier = None
+        if 'telegram' in self.config.notifiers():
+            self.telegram_notifier = SenderTelegram(self.config)
+
+        # Initialize willhaben processor with telegram notifier
+        self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier)
+
+    def _send_contact_success_notification(self, expose):
+        """Send a follow-up notification when a willhaben listing is successfully contacted"""
+        if not self.telegram_notifier:
+            return
+
+        title = expose.get('title', 'Unknown listing')
+        url = expose.get('url', '')
+
+        success_message = (
+            f"✅ ERFOLGREICH KONTAKTIERT ✅\n\n"
+            f"Listing: {title}\n"
+            f"URL: {url}"
+        )
+
+        self.telegram_notifier.notify(success_message)
+        logger.info(f"Sent success notification for: {title}")
 
     def crawl_for_exposes(self, max_pages=None):
         """Trigger a new crawl of the configured URLs"""
@@ -59,11 +84,15 @@ class Hunter:
         for expose in processor_chain.process(self.crawl_for_exposes(max_pages)):
             # Contact willhaben BEFORE logging/notifying
             expose = self.willhaben_processor.process_expose(expose)
-            
+
+            # Send success notification if listing was successfully contacted
+            if expose.get('_auto_contacted'):
+                self._send_contact_success_notification(expose)
+
             # Log the result
             contacted_marker = "✅ [CONTACTED]" if expose.get('_auto_contacted') else ""
             logger.info('New offer: %s %s', expose['title'], contacted_marker)
-            
+
             result.append(expose)
 
         return result
