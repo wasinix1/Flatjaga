@@ -8,22 +8,30 @@
 # set random_jitter to False. Note that Ebay will (temporarily)
 # block your IP if you poll too often - don't lower <sleeping_time>
 # below 600 seconds if you are crawling Ebay.
+#
+# IMPORTANT: sleeping_time is the DEFAULT/BASE delay for all crawlers.
+# Individual crawler delays below are ADDED ON TOP of this base delay.
 loop:
   active: yes
-  sleeping_time: 60
+  sleeping_time: 60          # Base delay (default for all crawlers)
   random_jitter: true
 
-# Per-crawler delay settings to avoid rate limiting
-# Different sites have different rate limit policies, so we can configure
-# different delays for each crawler. Times are in seconds.
+# Per-crawler ADDITIONAL delay settings to avoid rate limiting
+# These delays are OPTIONAL and ADDITIVE - they are added ON TOP of the
+# base sleeping_time delay above. If not specified, a crawler uses only
+# the base delay (sleeping_time).
+#
+# Example: If sleeping_time=60 and immobilienscout=540, then Immobilienscout
+# waits a total of 60+540=600 seconds (10 minutes) between crawls.
+#
+# Times are in seconds.
 crawler_delays:
-  default: 60                # Default delay for crawlers not listed below
-  immobilienscout: 600       # 10 minutes - strict rate limiting
-  wggesucht: 300             # 5 minutes - moderate rate limiting
-  wg_gesucht: 300            # 5 minutes - alternate name
-  willhaben: 180             # 3 minutes - less strict
-  immowelt: 300              # 5 minutes - moderate
-  kleinanzeigen: 300         # 5 minutes - moderate
+  immobilienscout: 540       # +9 minutes (total: 10 minutes with base 60s) - strict rate limiting
+  wggesucht: 240             # +4 minutes (total: 5 minutes with base 60s) - moderate rate limiting
+  wg_gesucht: 240            # +4 minutes (alternate name)
+  willhaben: 120             # +2 minutes (total: 3 minutes with base 60s) - less strict
+  immowelt: 240              # +4 minutes (total: 5 minutes with base 60s) - moderate
+  kleinanzeigen: 240         # +4 minutes (total: 5 minutes with base 60s) - moderate
 
 # Location of the Database to store already seen offerings
 # Defaults to the current directory

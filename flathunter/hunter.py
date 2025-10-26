@@ -28,8 +28,8 @@ class Hunter:
         # Track last crawl time per crawler to implement per-site delays
         self.last_crawl_times = {}
 
-        # Health monitoring: track crawler statistics
-        self.crawler_health = {}  # {crawler_name: {attempts, successes, failures, last_success_time, last_error, results_found}}
+        # Track last crawl status for each active crawler
+        self.crawler_status = {}  # {crawler_name: {'status': 'success'|'error', 'result_count': int, 'message': str}}
 
         # Initialize telegram notifier for success/failure notifications
         self.telegram_notifier = None
@@ -46,19 +46,27 @@ class Hunter:
     def get_crawler_delay(self, crawler_name: str) -> int:
         """Get the delay in seconds for a specific crawler from config
 
+        The delay is ADDITIVE: main loop delay + optional crawler-specific delay
+
         Args:
             crawler_name: Name of the crawler (e.g., 'Immobilienscout')
 
         Returns:
-            Delay in seconds before this crawler should be run again
+            Total delay in seconds before this crawler should be run again
         """
-        delays = self.config.get('crawler_delays', {})
-        default_delay = delays.get('default', 60)
+        # Main loop delay is the default base delay
+        base_delay = self.config.loop_period_seconds()
+
+        # Get optional additional delay for this crawler
+        crawler_delays = self.config.get('crawler_delays', {})
 
         # Normalize crawler name: lowercase and remove underscores
         crawler_key = crawler_name.lower().replace('_', '')
 
-        return delays.get(crawler_key, default_delay)
+        # Additional delay is added ON TOP of base delay (0 if not specified)
+        additional_delay = crawler_delays.get(crawler_key, 0)
+
+        return base_delay + additional_delay
 
     def should_crawl(self, crawler_name: str) -> bool:
         """Check if enough time has passed since last crawl for this crawler
@@ -92,62 +100,36 @@ class Hunter:
         self.last_crawl_times[crawler_name] = time.time()
         logger.debug(f"Marked {crawler_name} as crawled at {time.time()}")
 
-    def _init_crawler_health(self, crawler_name: str):
-        """Initialize health tracking for a crawler if not already done"""
-        if crawler_name not in self.crawler_health:
-            self.crawler_health[crawler_name] = {
-                'attempts': 0,
-                'successes': 0,
-                'failures': 0,
-                'last_success_time': None,
-                'last_error': None,
-                'results_found': 0
-            }
-
     def _record_crawler_success(self, crawler_name: str, num_results: int):
         """Record a successful crawl"""
-        self._init_crawler_health(crawler_name)
-        self.crawler_health[crawler_name]['attempts'] += 1
-        self.crawler_health[crawler_name]['successes'] += 1
-        self.crawler_health[crawler_name]['last_success_time'] = time.time()
-        self.crawler_health[crawler_name]['results_found'] += num_results
+        if num_results > 0:
+            message = f"Listings successfully fetched, {num_results} new result{'s' if num_results != 1 else ''}"
+        else:
+            message = "Listings successfully fetched, no new results"
+
+        self.crawler_status[crawler_name] = {
+            'status': 'success',
+            'result_count': num_results,
+            'message': message
+        }
 
     def _record_crawler_failure(self, crawler_name: str, error: str):
         """Record a failed crawl"""
-        self._init_crawler_health(crawler_name)
-        self.crawler_health[crawler_name]['attempts'] += 1
-        self.crawler_health[crawler_name]['failures'] += 1
-        self.crawler_health[crawler_name]['last_error'] = error
+        self.crawler_status[crawler_name] = {
+            'status': 'error',
+            'result_count': 0,
+            'message': f"Error: {error[:80]}"
+        }
 
-    def get_health_report(self) -> str:
-        """Generate a health report for all crawlers"""
-        if not self.crawler_health:
-            return "No crawler activity yet"
+    def get_crawler_status_report(self) -> str:
+        """Generate a concise status report for active crawlers only"""
+        if not self.crawler_status:
+            return ""
 
-        lines = ["", "=" * 60, "CRAWLER HEALTH REPORT", "=" * 60]
-        for crawler_name, stats in self.crawler_health.items():
-            success_rate = (stats['successes'] / stats['attempts'] * 100) if stats['attempts'] > 0 else 0
-            lines.append(f"\n{crawler_name}:")
-            lines.append(f"  Attempts: {stats['attempts']} | Successes: {stats['successes']} | Failures: {stats['failures']}")
-            lines.append(f"  Success Rate: {success_rate:.1f}%")
-            lines.append(f"  Results Found: {stats['results_found']}")
+        lines = []
+        for crawler_name, status in self.crawler_status.items():
+            lines.append(f"[{crawler_name} Crawler] {status['message']}")
 
-            if stats['last_success_time']:
-                elapsed = time.time() - stats['last_success_time']
-                if elapsed < 3600:
-                    time_ago = f"{elapsed/60:.0f}m ago"
-                elif elapsed < 86400:
-                    time_ago = f"{elapsed/3600:.1f}h ago"
-                else:
-                    time_ago = f"{elapsed/86400:.1f}d ago"
-                lines.append(f"  Last Success: {time_ago}")
-            else:
-                lines.append(f"  Last Success: Never")
-
-            if stats['last_error']:
-                lines.append(f"  Last Error: {stats['last_error'][:80]}")
-
-        lines.append("=" * 60)
         return "\n".join(lines)
 
     def _send_contact_success_notification(self, expose):
@@ -252,7 +234,9 @@ class Hunter:
 
             result.append(expose)
 
-        # Log health report to show crawler status
-        logger.info(self.get_health_report())
+        # Log crawler status report to show active crawler results
+        status_report = self.get_crawler_status_report()
+        if status_report:
+            logger.info("\n" + status_report)
 
         return result
