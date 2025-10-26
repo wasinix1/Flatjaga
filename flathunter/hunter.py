@@ -28,6 +28,9 @@ class Hunter:
         # Track last crawl time per crawler to implement per-site delays
         self.last_crawl_times = {}
 
+        # Health monitoring: track crawler statistics
+        self.crawler_health = {}  # {crawler_name: {attempts, successes, failures, last_success_time, last_error, results_found}}
+
         # Initialize telegram notifier for success/failure notifications
         self.telegram_notifier = None
         if 'telegram' in self.config.notifiers():
@@ -89,6 +92,64 @@ class Hunter:
         self.last_crawl_times[crawler_name] = time.time()
         logger.debug(f"Marked {crawler_name} as crawled at {time.time()}")
 
+    def _init_crawler_health(self, crawler_name: str):
+        """Initialize health tracking for a crawler if not already done"""
+        if crawler_name not in self.crawler_health:
+            self.crawler_health[crawler_name] = {
+                'attempts': 0,
+                'successes': 0,
+                'failures': 0,
+                'last_success_time': None,
+                'last_error': None,
+                'results_found': 0
+            }
+
+    def _record_crawler_success(self, crawler_name: str, num_results: int):
+        """Record a successful crawl"""
+        self._init_crawler_health(crawler_name)
+        self.crawler_health[crawler_name]['attempts'] += 1
+        self.crawler_health[crawler_name]['successes'] += 1
+        self.crawler_health[crawler_name]['last_success_time'] = time.time()
+        self.crawler_health[crawler_name]['results_found'] += num_results
+
+    def _record_crawler_failure(self, crawler_name: str, error: str):
+        """Record a failed crawl"""
+        self._init_crawler_health(crawler_name)
+        self.crawler_health[crawler_name]['attempts'] += 1
+        self.crawler_health[crawler_name]['failures'] += 1
+        self.crawler_health[crawler_name]['last_error'] = error
+
+    def get_health_report(self) -> str:
+        """Generate a health report for all crawlers"""
+        if not self.crawler_health:
+            return "No crawler activity yet"
+
+        lines = ["", "=" * 60, "CRAWLER HEALTH REPORT", "=" * 60]
+        for crawler_name, stats in self.crawler_health.items():
+            success_rate = (stats['successes'] / stats['attempts'] * 100) if stats['attempts'] > 0 else 0
+            lines.append(f"\n{crawler_name}:")
+            lines.append(f"  Attempts: {stats['attempts']} | Successes: {stats['successes']} | Failures: {stats['failures']}")
+            lines.append(f"  Success Rate: {success_rate:.1f}%")
+            lines.append(f"  Results Found: {stats['results_found']}")
+
+            if stats['last_success_time']:
+                elapsed = time.time() - stats['last_success_time']
+                if elapsed < 3600:
+                    time_ago = f"{elapsed/60:.0f}m ago"
+                elif elapsed < 86400:
+                    time_ago = f"{elapsed/3600:.1f}h ago"
+                else:
+                    time_ago = f"{elapsed/86400:.1f}d ago"
+                lines.append(f"  Last Success: {time_ago}")
+            else:
+                lines.append(f"  Last Success: Never")
+
+            if stats['last_error']:
+                lines.append(f"  Last Error: {stats['last_error'][:80]}")
+
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a listing is successfully contacted"""
         if not self.telegram_notifier:
@@ -124,16 +185,33 @@ class Hunter:
                 results = searcher.crawl(url, max_pages)
                 # Mark crawler as crawled after successful crawl
                 self.mark_crawler_crawled(crawler_name)
+                # Record success with result count
+                self._record_crawler_success(crawler_name, len(results))
+                logger.info(f"✓ {crawler_name} crawled successfully - found {len(results)} results")
                 return results
-            except CaptchaUnsolvableError:
-                logger.info("Error while scraping url %s: the captcha was unsolvable", url)
+            except CaptchaUnsolvableError as e:
+                error_msg = f"Captcha unsolvable"
+                logger.warning(f"✗ {crawler_name} failed: {error_msg}")
                 # Mark as crawled even on error to avoid hammering
                 self.mark_crawler_crawled(crawler_name)
+                # Record failure
+                self._record_crawler_failure(crawler_name, error_msg)
                 return []
-            except requests.exceptions.RequestException:
-                logger.info("Error while scraping url %s:\n%s", url, traceback.format_exc())
+            except requests.exceptions.RequestException as e:
+                error_msg = f"{type(e).__name__}: {str(e)[:100]}"
+                logger.warning(f"✗ {crawler_name} failed: {error_msg}")
                 # Mark as crawled even on error to avoid hammering
                 self.mark_crawler_crawled(crawler_name)
+                # Record failure
+                self._record_crawler_failure(crawler_name, error_msg)
+                return []
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)[:100]}"
+                logger.error(f"✗ {crawler_name} unexpected error: {error_msg}")
+                # Mark as crawled even on error to avoid hammering
+                self.mark_crawler_crawled(crawler_name)
+                # Record failure
+                self._record_crawler_failure(crawler_name, error_msg)
                 return []
 
         return chain(*[try_crawl(searcher, url, max_pages)
@@ -173,5 +251,8 @@ class Hunter:
             logger.info('New offer: %s %s', expose['title'], contacted_marker)
 
             result.append(expose)
+
+        # Log health report to show crawler status
+        logger.info(self.get_health_report())
 
         return result

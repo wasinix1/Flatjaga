@@ -80,9 +80,7 @@ class WillhabenContactBot:
             min_sec = self.delay_min
         if max_sec is None:
             max_sec = self.delay_max
-        time.sleep(random.uniform(min_sec, max_sec))
-    def _random_delay(self, min_sec=0.5, max_sec=2.0):
-        """Add a random delay to simulate human behavior"""
+
         # Delegate to stealth driver's smart_delay for better human-like behavior
         if self.stealth_driver:
             self.stealth_driver.smart_delay(min_sec, max_sec)
@@ -92,8 +90,8 @@ class WillhabenContactBot:
     def accept_cookies(self):
         """Accept cookie banner if it appears - optimized for speed"""
         try:
-            # Brief moment for banner to appear
-            time.sleep(random.uniform(0.1, 0.3))
+            # No initial delay - check immediately for performance
+            # If banner hasn't loaded yet, we'll catch it next time
 
             # Find all buttons on page
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
@@ -166,7 +164,8 @@ class WillhabenContactBot:
 
         # Need to visit the domain first before adding cookies
         self.driver.get('https://www.willhaben.at')
-        self._random_delay(0.2, 0.5)
+        # Brief delay to let domain load before adding cookies
+        time.sleep(0.1)
 
         with open(self.cookies_file, 'r') as f:
             cookies = json.load(f)

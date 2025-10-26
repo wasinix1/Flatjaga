@@ -83,8 +83,13 @@ class WgGesuchtContactBot:
             min_sec = self.delay_min
         if max_sec is None:
             max_sec = self.delay_max
-        time.sleep(random.uniform(min_sec, max_sec))
-    
+
+        # Delegate to stealth driver's smart_delay for better human-like behavior
+        if hasattr(self, 'stealth_driver') and self.stealth_driver:
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            time.sleep(random.uniform(min_sec, max_sec))
+
     def _init_driver(self):
         """Create Selenium driver."""
         chrome_options = Options()
@@ -95,7 +100,7 @@ class WgGesuchtContactBot:
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        
+
         self.driver = webdriver.Chrome(options=chrome_options)
         logger.info("Chrome driver initialized")
 
@@ -107,14 +112,6 @@ class WgGesuchtContactBot:
         else:
             logger.warning("No saved session found")
             return False
-
-    def _random_delay(self, min_sec=0.5, max_sec=1.5):
-        """Add random delay to mimic human behavior."""
-        # Delegate to stealth driver's smart_delay for better human-like behavior
-        if hasattr(self, 'stealth_driver') and self.stealth_driver:
-            self.stealth_driver.smart_delay(min_sec, max_sec)
-        else:
-            time.sleep(random.uniform(min_sec, max_sec))
     
     def _load_or_login(self):
         """Load saved session or prompt for manual login."""
@@ -148,7 +145,7 @@ class WgGesuchtContactBot:
             
             # Refresh to apply cookies
             self.driver.get(WG_GESUCHT_URL)
-            time.sleep(1)
+            time.sleep(0.3)  # Reduced from 1s for performance
             
             # Validate session
             if self._validate_session():
@@ -470,7 +467,7 @@ def contact_listing(driver, listing_url, template_index=0, timeout=10):
             print("  ⚠️  Security tips popup didn't appear (may have been dismissed before)")
         
         # Small wait for page to settle after popup
-        time.sleep(1)
+        time.sleep(0.3)  # Reduced from 1s for performance
         
         # Step 4: Click "Vorlage einfügen" button to open template selector
         try:
@@ -520,7 +517,7 @@ def contact_listing(driver, listing_url, template_index=0, timeout=10):
             raise ContactFailedException("Could not find 'VORLAGE EINFÜGEN' button")
         
         # Small wait for template to be inserted
-        time.sleep(1)
+        time.sleep(0.3)  # Reduced from 1s for performance
         
         # Step 7: Click "Senden" button (final send)
         try:
