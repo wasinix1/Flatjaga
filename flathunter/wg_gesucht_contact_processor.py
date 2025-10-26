@@ -4,7 +4,7 @@ Detects browser crashes and restarts automatically
 """
 
 from flathunter.logging import logger
-from wg_gesucht_contact_bot import WgGesuchtContactBot, SessionExpiredException
+from flathunter.wg_gesucht_contact_bot import WgGesuchtContactBot, SessionExpiredException
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
 import json
