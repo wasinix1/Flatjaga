@@ -229,3 +229,15 @@ wg_gesucht_auto_contact: true
 wg_gesucht_template_index: 0
 # Run browser in headless mode
 wg_gesucht_headless: true
+# Delay between actions (in seconds) - set min and max for random delays
+wg_gesucht_delay_min: 0.5
+wg_gesucht_delay_max: 1.5
+
+# Willhaben auto-contact configuration
+# Enable automatic contacting of Willhaben listings
+willhaben_auto_contact: true
+# Run browser in headless mode
+willhaben_headless: true
+# Delay between actions (in seconds) - set min and max for random delays
+willhaben_delay_min: 0.5
+willhaben_delay_max: 2.0
