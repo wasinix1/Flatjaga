@@ -9,6 +9,7 @@ import json
 import os
 import random
 from datetime import datetime
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -19,7 +20,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-COOKIE_FILE = 'wg_gesucht_cookies.json'
+COOKIE_FILE = str(Path.home() / '.wg_gesucht_cookies.json')
 WG_GESUCHT_URL = 'https://www.wg-gesucht.de'
 
 

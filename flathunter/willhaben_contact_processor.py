@@ -117,7 +117,7 @@ class WillhabenContactProcessor:
             if not self.bot.load_cookies():
                 logger.warning(
                     "No willhaben session found. "
-                    "Run 'python willhaben_contact_bot.py' to login first."
+                    "Run 'python setup_sessions.py' to login first."
                 )
                 return False
 
@@ -171,7 +171,7 @@ class WillhabenContactProcessor:
             except SessionExpiredException as e:
                 elapsed = time.time() - start_time
                 self.total_errors += 1
-                logger.error(f"Session expired ({elapsed:.1f}s) - run 'python willhaben_contact_bot.py' to re-login")
+                logger.error(f"Session expired ({elapsed:.1f}s) - run 'python setup_sessions.py' to re-login")
                 expose['_auto_contacted'] = False
 
                 # Log failure with special category

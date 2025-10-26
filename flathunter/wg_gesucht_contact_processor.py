@@ -53,7 +53,7 @@ class WgGesuchtContactProcessor:
             if not self.bot.session_valid:
                 logger.error(
                     "WG-Gesucht session not valid. "
-                    "Run standalone test to login first."
+                    "Run 'python setup_sessions.py' to login first."
                 )
                 return False
             
@@ -103,7 +103,7 @@ class WgGesuchtContactProcessor:
                 
                 # If session became invalid, stop trying
                 if not self.bot.session_valid:
-                    logger.error("⚠️  Session invalid. Disabling bot for this run.")
+                    logger.error("⚠️  Session invalid. Run 'python setup_sessions.py' to re-login. Disabling bot for this run.")
                     self.bot_ready = False
         
         except Exception as e:

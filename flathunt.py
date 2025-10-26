@@ -45,6 +45,23 @@ def check_saved_sessions():
             # If we can't read the file, just show that it exists
             sessions_found.append(('willhaben', willhaben_cookies, 'saved session'))
 
+    # Check for wg-gesucht session
+    wggesucht_cookies = Path.home() / '.wg_gesucht_cookies.json'
+    if wggesucht_cookies.exists():
+        try:
+            with open(wggesucht_cookies, 'r') as f:
+                cookies = json.load(f)
+                # Try to extract username or email if available in cookies
+                user_info = "saved session"
+                for cookie in cookies:
+                    if cookie.get('name') in ['username', 'email', 'user']:
+                        user_info = cookie.get('value', user_info)
+                        break
+                sessions_found.append(('wg-gesucht', wggesucht_cookies, user_info))
+        except:
+            # If we can't read the file, just show that it exists
+            sessions_found.append(('wg-gesucht', wggesucht_cookies, 'saved session'))
+
     # If no sessions found, just continue
     if not sessions_found:
         return
@@ -69,7 +86,7 @@ def check_saved_sessions():
             except Exception as e:
                 logger.error(f"Failed to clear {service} session: {e}")
         print("\nYou can now login with a different account.")
-        print("Run 'python willhaben_contact_bot.py' to setup a new session.\n")
+        print("Run 'python setup_sessions.py' to login and setup new sessions.\n")
         return
     else:
         print("Using saved session(s)...\n")
