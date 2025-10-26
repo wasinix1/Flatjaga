@@ -13,7 +13,7 @@ from datetime import datetime
 
 
 class WillhabenContactProcessor:
-    """Processor that auto-contacts willhaben listings - with crash recovery"""
+    """Processor that auto-contacts willhaben listings - with crash recovery and headless fallback"""
 
     def __init__(self, config, telegram_notifier=None, id_watch=None):
         self.config = config
@@ -24,10 +24,19 @@ class WillhabenContactProcessor:
         self.telegram_notifier = telegram_notifier
         self.id_watch = id_watch
 
+        # Get config options
+        self.headless = config.get('willhaben_headless', True)
+        self.delay_min = config.get('willhaben_delay_min', 0.5)
+        self.delay_max = config.get('willhaben_delay_max', 2.0)
+
+        # Track headless mode for fallback
+        self.headless_original = self.headless  # Remember original setting
+        self.current_headless = self.headless  # Track current mode
+
         # Setup failure log file
         self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
 
-        logger.info("Willhaben auto-contact processor initialized (with auto-recovery, title cross-ref enabled)")
+        logger.info(f"Willhaben auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled)")
 
     def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
         """Log contact failure to file with timestamp and details"""
@@ -85,42 +94,57 @@ class WillhabenContactProcessor:
         ]
         return any(indicator in error_str for indicator in dead_indicators)
     
-    def _restart_bot(self):
-        """Kill and restart the browser"""
-        logger.warning("Browser crashed or disconnected - restarting...")
-        
+    def _restart_bot(self, use_headless=None):
+        """
+        Kill and restart the browser
+
+        Args:
+            use_headless: Override headless mode (None = use current setting)
+        """
+        if use_headless is not None:
+            logger.warning(f"Browser crashed or disconnected - restarting with headless={use_headless}...")
+        else:
+            logger.warning("Browser crashed or disconnected - restarting...")
+
         # Close old browser if it exists
         if self.bot:
             try:
                 self.bot.close()
             except:
                 pass  # Already dead, that's fine
-        
+
         self.bot = None
         self.bot_ready = False
-        
+
         # Wait a moment before restarting
         time.sleep(2)
-        
-        # Try to reinit
-        return self._init_bot()
-    
-    def _init_bot(self):
-        """Lazy init the selenium bot"""
+
+        # Try to reinit with specified headless mode
+        return self._init_bot(use_headless=use_headless)
+
+    def _init_bot(self, use_headless=None):
+        """
+        Lazy init the selenium bot
+
+        Args:
+            use_headless: Override headless mode (None = use current setting)
+        """
         if self.bot_ready:
             return True
 
-        try:
-            # Get config values with defaults
-            headless = self.config.get('willhaben_headless', True)
-            delay_min = self.config.get('willhaben_delay_min', 0.5)
-            delay_max = self.config.get('willhaben_delay_max', 2.0)
+        # Determine headless mode to use
+        if use_headless is not None:
+            headless_mode = use_headless
+            self.current_headless = use_headless
+        else:
+            headless_mode = self.current_headless
 
-            logger.info(f"Starting willhaben contact bot (headless={headless}, delays={delay_min}-{delay_max}s)...")
+        try:
+            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={self.delay_min}-{self.delay_max}s)...")
             self.bot = WillhabenContactBot(
-                headless=headless,
-                delay_min=delay_min,
-                delay_max=delay_max
+                headless=headless_mode,
+                delay_min=self.delay_min,
+                delay_max=self.delay_max
             )
             self.bot.start()
 
@@ -132,7 +156,7 @@ class WillhabenContactProcessor:
                 return False
 
             self.bot_ready = True
-            logger.info(f"✓ Willhaben bot ready (stats: {self.total_contacted} contacted, {self.total_errors} errors)")
+            logger.info(f"✓ Willhaben bot ready (headless={headless_mode}, stats: {self.total_contacted} contacted, {self.total_errors} errors)")
             return True
 
         except Exception as e:
@@ -143,6 +167,7 @@ class WillhabenContactProcessor:
         """
         Process a single expose - contact if willhaben
         WITH AUTO-RECOVERY: Restarts browser if it crashes
+        WITH HEADLESS FALLBACK: Retries with headless=false if headless mode fails
         WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
         """
         # Check if it's willhaben
@@ -164,8 +189,11 @@ class WillhabenContactProcessor:
         if not self._init_bot():
             return expose  # Bot failed, pass through
 
+        # Track if we should try headless fallback
+        tried_non_headless = False
+
         # Try to contact (with auto-recovery)
-        max_retries = 2
+        max_retries = 1
         for attempt in range(max_retries):
             start_time = time.time()
             try:
@@ -184,6 +212,11 @@ class WillhabenContactProcessor:
                     # Mark title as contacted to prevent duplicates across platforms
                     if self.id_watch:
                         self.id_watch.mark_title_contacted(expose)
+
+                    # Reset to original headless mode after success
+                    if self.current_headless != self.headless_original:
+                        self.current_headless = self.headless_original
+                        logger.info(f"Resetting to headless={self.headless_original} for next listing")
                 else:
                     logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
@@ -202,6 +235,8 @@ class WillhabenContactProcessor:
 
                 # Stop processing - session is expired, mark bot as not ready
                 self.bot_ready = False
+                # Don't try headless fallback for session expiration
+                tried_non_headless = True
                 break
 
             except (InvalidSessionIdException, WebDriverException) as e:
@@ -217,27 +252,25 @@ class WillhabenContactProcessor:
                         if self._restart_bot():
                             continue  # Try again with new browser
                         else:
-                            logger.error("Failed to restart browser - giving up")
+                            logger.error("Failed to restart browser")
                             expose['_auto_contacted'] = False
-                            # Log failure and notify on final failure
+                            # Log failure but don't notify yet - might try headless fallback
                             self._log_failure_to_file(expose, "Failed to restart browser", "browser_crash")
-                            self._send_failure_notification(expose, "Browser abgestürzt und Neustart fehlgeschlagen")
                             break
                     else:
-                        logger.error("Max retries reached - giving up on this listing")
+                        logger.error("Max retries reached")
                         expose['_auto_contacted'] = False
-                        # Log failure and notify
+                        # Log failure but don't notify yet - might try headless fallback
                         self._log_failure_to_file(expose, "Max retries reached after browser crash", "browser_crash_max_retries")
-                        self._send_failure_notification(expose, "Browser abgestürzt - maximale Wiederholungen erreicht")
+                        break
                 else:
                     # Some other WebDriver error
                     self.total_errors += 1
                     error_msg = f"WebDriver error ({elapsed:.1f}s): {e}"
                     logger.error(error_msg)
                     expose['_auto_contacted'] = False
-                    # Log failure and notify
+                    # Log failure but don't notify yet - might try headless fallback
                     self._log_failure_to_file(expose, str(e), "webdriver_error")
-                    self._send_failure_notification(expose, f"WebDriver Fehler: {str(e)[:100]}")
                     break
 
             except Exception as e:
@@ -246,11 +279,68 @@ class WillhabenContactProcessor:
                 error_msg = f"Unexpected error ({elapsed:.1f}s): {e}"
                 logger.error(error_msg)
                 expose['_auto_contacted'] = False
-                # Log failure and notify
+                # Log failure but don't notify yet - might try headless fallback
                 self._log_failure_to_file(expose, str(e), "unexpected_error")
-                self._send_failure_notification(expose, f"Unerwarteter Fehler: {str(e)[:100]}")
                 break
-        
+
+        # HEADLESS FALLBACK: If failed in headless mode, try with visible browser
+        if (expose.get('_auto_contacted') == False and
+            self.headless_original and
+            not tried_non_headless and
+            self.current_headless):
+
+            logger.warning("Contact failed in headless mode - trying with visible browser (headless=false)...")
+            tried_non_headless = True
+
+            # Restart browser in non-headless mode
+            if self._restart_bot(use_headless=False):
+                # Try one more time with visible browser
+                start_time = time.time()
+                try:
+                    title = expose.get('title', 'Unknown')
+                    logger.info(f"Auto-contacting with visible browser: {title[:50]}...")
+
+                    success = self.bot.send_contact_message(url)
+
+                    elapsed = time.time() - start_time
+                    if success:
+                        self.total_contacted += 1
+                        logger.info(f"✓ Contacted successfully with visible browser ({elapsed:.1f}s, total: {self.total_contacted})")
+                        expose['_auto_contacted'] = True
+
+                        # Mark title as contacted to prevent duplicates across platforms
+                        if self.id_watch:
+                            self.id_watch.mark_title_contacted(expose)
+
+                        # Success with non-headless - keep using it for consistency
+                        logger.info("Non-headless mode succeeded - will use it for remaining listings")
+                    else:
+                        logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
+                        expose['_auto_contacted'] = False
+                        # Now send notifications since all retry options exhausted
+                        self._send_failure_notification(expose, "Fehler auch mit sichtbarem Browser")
+
+                except SessionExpiredException as e:
+                    elapsed = time.time() - start_time
+                    logger.error(f"Session expired in non-headless mode ({elapsed:.1f}s)")
+                    expose['_auto_contacted'] = False
+                    # Don't send notification for session expiration
+
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    logger.error(f"Error in non-headless mode ({elapsed:.1f}s): {e}")
+                    expose['_auto_contacted'] = False
+                    # Send notification since all options exhausted
+                    self._send_failure_notification(expose, f"Fehler auch mit sichtbarem Browser: {str(e)[:100]}")
+            else:
+                logger.error("Failed to restart browser in non-headless mode")
+                # Send notification since we couldn't even try the fallback
+                self._send_failure_notification(expose, "Neustart mit sichtbarem Browser fehlgeschlagen")
+
+        # If we failed and didn't try headless fallback, send notification now
+        elif expose.get('_auto_contacted') == False and not tried_non_headless:
+            self._send_failure_notification(expose, "Kontakt fehlgeschlagen")
+
         return expose
     
     def close(self):

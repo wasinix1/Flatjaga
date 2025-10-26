@@ -13,14 +13,9 @@ from datetime import datetime
 
 
 class WgGesuchtContactProcessor:
-    """
-    Processor that contacts WG-Gesucht listings before sending notifications.
-    Follows same pattern as WillhabenContactProcessor.
-    """
-    
-    def __init__(self, config, telegram_notifier=None):
+    """Processor that auto-contacts WG-Gesucht listings - with crash recovery and headless fallback"""
 
-    def __init__(self, config, id_watch=None):
+    def __init__(self, config, telegram_notifier=None, id_watch=None):
         """
         Initialize processor with config.
 
@@ -32,80 +27,26 @@ class WgGesuchtContactProcessor:
         self.config = config
         self.bot = None
         self.bot_ready = False
-        self.id_watch = id_watch
-    """Processor that auto-contacts WG-Gesucht listings - with crash recovery"""
-
-    def __init__(self, config, telegram_notifier=None):
-        self.config = config
-        self.bot = None
-        self.bot_ready = False
         self.total_contacted = 0
         self.total_errors = 0
         self.telegram_notifier = telegram_notifier
+        self.id_watch = id_watch
 
         # Get config options
         self.enabled = config.get('wg_gesucht_auto_contact', False)
         self.template_index = config.get('wg_gesucht_template_index', 0)
         self.headless = config.get('wg_gesucht_headless', True)
-
-        logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled}, title cross-ref enabled)")
         self.delay_min = config.get('wg_gesucht_delay_min', 0.5)
         self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
 
-        logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled})")
-
-    def _send_failure_notification(self, expose, error_message):
-        """Send Telegram notification when contact fails"""
-        if not self.telegram_notifier:
-            return
-
-        try:
-            title = expose.get('title', 'Unknown listing')
-            url = expose.get('url', '')
-
-            failure_message = (
-                f"⚠️ WG-GESUCHT KONTAKT FEHLGESCHLAGEN ⚠️\n\n"
-                f"Listing: {title}\n"
-                f"URL: {url}\n"
-                f"Fehler: {error_message[:200]}"
-            )
-
-            self.telegram_notifier.notify(failure_message)
-            logger.info(f"Sent failure notification for: {title}")
-
-        except Exception as e:
-            logger.error(f"Failed to send failure notification: {e}")
-
-    def _init_bot(self):
-        """Initialize bot if needed. Returns True if bot is ready."""
+        # Track headless mode for fallback
         self.headless_original = self.headless  # Remember original setting
         self.current_headless = self.headless  # Track current mode
 
         # Setup failure log file
         self.failure_log_file = Path.home() / '.wg_gesucht_contact_failures.jsonl'
 
-        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless})")
-
-    def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
-        """Log contact failure to file with timestamp and details"""
-        try:
-            failure_entry = {
-                "timestamp": datetime.now().isoformat(),
-                "url": expose.get('url', 'N/A'),
-                "title": expose.get('title', 'N/A'),
-                "error_type": error_type,
-                "error_message": str(error_message),
-                "total_errors": self.total_errors
-            }
-
-            # Append to JSONL file (one JSON object per line)
-            with open(self.failure_log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(failure_entry, ensure_ascii=False) + '\n')
-
-            logger.debug(f"Logged failure to {self.failure_log_file}")
-
-        except Exception as e:
-            logger.error(f"Failed to log failure to file: {e}")
+        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, title cross-ref enabled)")
 
     def _send_failure_notification(self, expose, error_message):
         """Send Telegram notification when contact fails"""
@@ -129,6 +70,27 @@ class WgGesuchtContactProcessor:
 
         except Exception as e:
             logger.error(f"Failed to send failure notification: {e}")
+
+    def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
+        """Log contact failure to file with timestamp and details"""
+        try:
+            failure_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "url": expose.get('url', 'N/A'),
+                "title": expose.get('title', 'N/A'),
+                "error_type": error_type,
+                "error_message": str(error_message),
+                "total_errors": self.total_errors
+            }
+
+            # Append to JSONL file (one JSON object per line)
+            with open(self.failure_log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(failure_entry, ensure_ascii=False) + '\n')
+
+            logger.debug(f"Logged failure to {self.failure_log_file}")
+
+        except Exception as e:
+            logger.error(f"Failed to log failure to file: {e}")
 
     def _is_browser_dead(self, error):
         """Check if error indicates browser crash"""
@@ -191,26 +153,22 @@ class WgGesuchtContactProcessor:
             headless_mode = self.current_headless
 
         try:
-            logger.info(f"Starting WG-Gesucht bot (delays={self.delay_min}-{self.delay_max}s)...")
+            logger.info(f"Starting WG-Gesucht contact bot (headless={headless_mode}, delays={self.delay_min}-{self.delay_max}s)...")
             self.bot = WgGesuchtContactBot(
-                headless=self.headless,
+                headless=headless_mode,
                 template_index=self.template_index,
                 delay_min=self.delay_min,
                 delay_max=self.delay_max
-            )
-
-            logger.info(f"Starting WG-Gesucht contact bot (headless={headless_mode})...")
-            self.bot = WgGesuchtContactBot(
-                headless=headless_mode,
-                template_index=self.template_index
             )
             self.bot.start()
 
             if not self.bot.load_cookies():
                 logger.warning(
                     "No WG-Gesucht session found. "
-                    "Run standalone bot to login first."
-            
+                    "Run 'python setup_sessions.py' to login first."
+                )
+                return False
+
             if not self.bot.session_valid:
                 logger.error(
                     "WG-Gesucht session not valid. "
@@ -228,22 +186,10 @@ class WgGesuchtContactProcessor:
 
     def process_expose(self, expose):
         """
-        Process a listing expose. If it's a WG-Gesucht listing, contact it.
-        WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
-
-        Args:
-            expose: Listing expose dict with at least 'url' field
-
-        Returns:
-            expose: Modified expose with 'contacted' flag if successful
-        """
-
-        # Check if this is a WG-Gesucht listing
-        url = expose.get('url', '')
-        crawler = expose.get('crawler', '').lower()
         Process a single expose - contact if WG-Gesucht
         WITH AUTO-RECOVERY: Restarts browser if it crashes
         WITH HEADLESS FALLBACK: Retries with headless=false if headless mode fails
+        WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
         """
         # Check if it's WG-Gesucht
         crawler = expose.get('crawler', '').lower()
@@ -264,44 +210,11 @@ class WgGesuchtContactProcessor:
         if not self._init_bot():
             return expose  # Bot failed, pass through
 
-        # Try to contact listing
-        try:
-            title = expose.get('title', 'Unknown')
-            logger.info(f"Auto-contacting WG-Gesucht listing: {title}")
-
-            success = self.bot.send_contact_message(url)
-
-            if success:
-                logger.info("✓ Successfully contacted")
-                expose['_auto_contacted'] = True
-
-                # Mark title as contacted to prevent duplicates across platforms
-                if self.id_watch:
-                    self.id_watch.mark_title_contacted(expose)
-            else:
-                logger.warning("⚠️  Failed to contact listing")
-                expose['_auto_contacted'] = False
-
-                # If session became invalid, stop trying
-                if not self.bot.session_valid:
-                    error_msg = "Session invalid. Disabling bot for this run."
-                    logger.error(f"⚠️  {error_msg}")
-                    self.bot_ready = False
-                    self._send_failure_notification(expose, error_msg)
-                else:
-                    self._send_failure_notification(expose, "Failed to send contact message")
-
-        except Exception as e:
-            error_msg = f"Error contacting WG-Gesucht listing: {e}"
-            logger.error(error_msg)
-            expose['_auto_contacted'] = False
-            self._send_failure_notification(expose, str(e))
-        
         # Track if we should try headless fallback
         tried_non_headless = False
 
         # Try to contact (with auto-recovery)
-        max_retries = 2
+        max_retries = 1
         for attempt in range(max_retries):
             start_time = time.time()
             try:
@@ -316,6 +229,11 @@ class WgGesuchtContactProcessor:
                     self.total_contacted += 1
                     logger.info(f"✓ Contacted successfully ({elapsed:.1f}s, total: {self.total_contacted})")
                     expose['_auto_contacted'] = True
+
+                    # Mark title as contacted to prevent duplicates across platforms
+                    if self.id_watch:
+                        self.id_watch.mark_title_contacted(expose)
+
                     # Reset to original headless mode after success
                     if self.current_headless != self.headless_original:
                         self.current_headless = self.headless_original
@@ -422,11 +340,6 @@ class WgGesuchtContactProcessor:
                     elapsed = time.time() - start_time
                     logger.error(f"Session expired in non-headless mode ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
-                
-                # If session became invalid, stop trying
-                if not self.bot.session_valid:
-                    logger.error("⚠️  Session invalid. Run 'python setup_sessions.py' to re-login. Disabling bot for this run.")
-                    self.bot_ready = False
                     # Don't send notification for session expiration
 
                 except Exception as e:
