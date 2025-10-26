@@ -103,8 +103,14 @@ class StealthDriver:
         hours_running = (time.time() - self.session_start) / 3600
         return hours_running > 2 or self.actions_count > 100
 
-    def navigate(self, url):
-        """Navigate with anti-detection measures"""
+    def navigate(self, url, auto_delay=False):
+        """Navigate with anti-detection measures
+
+        Args:
+            url: URL to navigate to
+            auto_delay: If True, adds automatic delay after navigation (default False)
+                       Callers should handle their own delays for better control
+        """
         self.actions_count += 1
 
         # Check if we should restart
@@ -113,7 +119,10 @@ class StealthDriver:
             self.restart()
 
         self.driver.get(url)
-        self.smart_delay(1, 2)  # Wait for page load like human
+
+        # Only auto-delay if explicitly requested (callers usually handle delays themselves)
+        if auto_delay:
+            self.smart_delay(0.3, 0.6)  # Reduced from 1-2s to 0.3-0.6s
 
     def restart(self):
         """Clean restart"""
