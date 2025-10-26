@@ -17,6 +17,8 @@ class WgGesuchtContactProcessor:
     Processor that contacts WG-Gesucht listings before sending notifications.
     Follows same pattern as WillhabenContactProcessor.
     """
+    
+    def __init__(self, config, telegram_notifier=None):
 
     def __init__(self, config, id_watch=None):
         """
@@ -51,7 +53,29 @@ class WgGesuchtContactProcessor:
         self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
 
         logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled})")
-    
+
+    def _send_failure_notification(self, expose, error_message):
+        """Send Telegram notification when contact fails"""
+        if not self.telegram_notifier:
+            return
+
+        try:
+            title = expose.get('title', 'Unknown listing')
+            url = expose.get('url', '')
+
+            failure_message = (
+                f"⚠️ WG-GESUCHT KONTAKT FEHLGESCHLAGEN ⚠️\n\n"
+                f"Listing: {title}\n"
+                f"URL: {url}\n"
+                f"Fehler: {error_message[:200]}"
+            )
+
+            self.telegram_notifier.notify(failure_message)
+            logger.info(f"Sent failure notification for: {title}")
+
+        except Exception as e:
+            logger.error(f"Failed to send failure notification: {e}")
+
     def _init_bot(self):
         """Initialize bot if needed. Returns True if bot is ready."""
         self.headless_original = self.headless  # Remember original setting
@@ -244,7 +268,7 @@ class WgGesuchtContactProcessor:
         try:
             title = expose.get('title', 'Unknown')
             logger.info(f"Auto-contacting WG-Gesucht listing: {title}")
-            
+
             success = self.bot.send_contact_message(url)
 
             if success:
@@ -258,6 +282,21 @@ class WgGesuchtContactProcessor:
                 logger.warning("⚠️  Failed to contact listing")
                 expose['_auto_contacted'] = False
 
+                # If session became invalid, stop trying
+                if not self.bot.session_valid:
+                    error_msg = "Session invalid. Disabling bot for this run."
+                    logger.error(f"⚠️  {error_msg}")
+                    self.bot_ready = False
+                    self._send_failure_notification(expose, error_msg)
+                else:
+                    self._send_failure_notification(expose, "Failed to send contact message")
+
+        except Exception as e:
+            error_msg = f"Error contacting WG-Gesucht listing: {e}"
+            logger.error(error_msg)
+            expose['_auto_contacted'] = False
+            self._send_failure_notification(expose, str(e))
+        
         # Track if we should try headless fallback
         tried_non_headless = False
 

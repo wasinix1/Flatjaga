@@ -32,25 +32,30 @@ class Hunter:
         # Initialize willhaben processor with telegram notifier and id_watch
         self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier, id_watch)
 
-        # Initialize wg-gesucht processor with id_watch
-        self.wg_gesucht_processor = WgGesuchtContactProcessor(config, id_watch)
+        # Initialize wg-gesucht processor with telegram notifier and id_watch
+        self.wg_gesucht_processor = WgGesuchtContactProcessor(config, self.telegram_notifier, id_watch)
+
 
     def _send_contact_success_notification(self, expose):
-        """Send a follow-up notification when a willhaben listing is successfully contacted"""
+        """Send a follow-up notification when a listing is successfully contacted"""
         if not self.telegram_notifier:
+            logger.warning("Cannot send success notification - telegram notifier not initialized")
             return
 
-        title = expose.get('title', 'Unknown listing')
-        url = expose.get('url', '')
+        try:
+            title = expose.get('title', 'Unknown listing')
+            url = expose.get('url', '')
 
-        success_message = (
-            f"✅ ERFOLGREICH KONTAKTIERT ✅\n\n"
-            f"Listing: {title}\n"
-            f"URL: {url}"
-        )
+            success_message = (
+                f"✅ ERFOLGREICH KONTAKTIERT ✅\n\n"
+                f"Listing: {title}\n"
+                f"URL: {url}"
+            )
 
-        self.telegram_notifier.notify(success_message)
-        logger.info(f"Sent success notification for: {title}")
+            self.telegram_notifier.notify(success_message)
+            logger.info(f"✓ Sent success notification for: {title}")
+        except Exception as e:
+            logger.error(f"✗ Failed to send success notification for {title}: {e}", exc_info=True)
 
     def crawl_for_exposes(self, max_pages=None):
         """Trigger a new crawl of the configured URLs"""
