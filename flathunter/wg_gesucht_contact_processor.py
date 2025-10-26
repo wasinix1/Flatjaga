@@ -151,6 +151,11 @@ class WgGesuchtContactProcessor:
                 logger.warning(
                     "No WG-Gesucht session found. "
                     "Run standalone bot to login first."
+            
+            if not self.bot.session_valid:
+                logger.error(
+                    "WG-Gesucht session not valid. "
+                    "Run 'python setup_sessions.py' to login first."
                 )
                 return False
 
@@ -304,6 +309,10 @@ class WgGesuchtContactProcessor:
                     elapsed = time.time() - start_time
                     logger.error(f"Session expired in non-headless mode ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
+                
+                # If session became invalid, stop trying
+                if not self.bot.session_valid:
+                    logger.error("⚠️  Session invalid. Run 'python setup_sessions.py' to re-login. Disabling bot for this run.")
                     self.bot_ready = False
                     # Don't send notification for session expiration
 
