@@ -75,39 +75,30 @@ class IdMaintainer:
     def normalize_title(title):
         """
         Normalize a listing title for cross-reference matching.
-        Removes noise and creates a canonical form for comparison.
+        Conservative approach: only removes formatting noise, keeps all distinctive content.
         """
         if not title:
             return ""
 
-        # Convert to lowercase
+        # Convert to lowercase for case-insensitive matching
         normalized = title.lower()
 
-        # Remove common location markers (case-insensitive)
-        location_words = [
-            'wien', 'vienna', 'österreich', 'austria',
-            'bezirk', 'district', 'nähe', 'near'
-        ]
-        for word in location_words:
-            normalized = re.sub(r'\b' + word + r'\b', '', normalized, flags=re.IGNORECASE)
+        # Normalize whitespace characters (tabs, newlines, multiple spaces)
+        normalized = re.sub(r'\s+', ' ', normalized)
 
-        # Remove measurements and units
-        normalized = re.sub(r'\d+\s*m[²2]', '', normalized)  # Remove "50 m²" or "50m2"
-        normalized = re.sub(r'\d+\s*qm', '', normalized)  # Remove "50 qm"
+        # Normalize common unicode variations
+        replacements = {
+            'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
+            'é': 'e', 'è': 'e', 'ê': 'e',
+            'à': 'a', 'á': 'a', 'â': 'a',
+        }
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
 
-        # Remove price indicators
-        normalized = re.sub(r'[€$]\s*\d+', '', normalized)  # Remove "€ 800" or "$800"
-        normalized = re.sub(r'\d+\s*[€$]', '', normalized)  # Remove "800 €"
-        normalized = re.sub(r'\d+\s*eur', '', normalized)  # Remove "800 eur"
-
-        # Remove room indicators like "2-zimmer", "3 zimmer"
-        normalized = re.sub(r'\d+[-\s]*zimmer', '', normalized)
-        normalized = re.sub(r'\d+[-\s]*room', '', normalized)
-
-        # Remove special characters but keep spaces
+        # Remove common punctuation but keep numbers and letters
         normalized = re.sub(r'[^\w\s]', ' ', normalized)
 
-        # Collapse multiple spaces to single space
+        # Collapse multiple spaces again after punctuation removal
         normalized = re.sub(r'\s+', ' ', normalized)
 
         # Trim whitespace
