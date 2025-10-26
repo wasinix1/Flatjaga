@@ -69,8 +69,8 @@ def blacklist_online_listings(dry_run=False):
     config = Config(str(config_path))
 
     # Separate URLs by platform
-    willhaben_urls = [url for url in config.urls() if 'willhaben.at' in url]
-    wg_gesucht_urls = [url for url in config.urls() if 'wg-gesucht.de' in url]
+    willhaben_urls = [url for url in config.target_urls() if 'willhaben.at' in url]
+    wg_gesucht_urls = [url for url in config.target_urls() if 'wg-gesucht.de' in url]
 
     if not willhaben_urls and not wg_gesucht_urls:
         logger.warning("No Willhaben or WG-Gesucht URLs found in config!")
