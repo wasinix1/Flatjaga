@@ -2,15 +2,20 @@
 
 ## Purpose
 
-This tool prevents accidentally spamming contacts when database files get cleaned up during updates. It fetches all currently online Willhaben listings from your configured search URLs and marks them as already seen/contacted in all tracking systems.
+This tool prevents accidentally spamming contacts when database files get cleaned up during updates. It fetches all currently online listings from **Willhaben** and **WG-Gesucht** from your configured search URLs and marks them as already seen/contacted in all tracking systems.
 
 ## What It Does
 
-The script marks listings in **three tracking systems**:
+The script marks listings in the tracking systems:
 
+### For Both Platforms (Willhaben & WG-Gesucht):
 1. **`processed_ids.db`** - Main SQLite database (processed table)
 2. **`processed_ids.db`** - Title tracking for cross-platform duplicates (contacted_titles table)
+
+### For Willhaben Only:
 3. **`~/.willhaben_contacted.json`** - Willhaben-specific contacted cache
+
+> **Note:** WG-Gesucht only uses the SQLite database for tracking and doesn't have a separate JSON cache file.
 
 ## Usage
 
@@ -57,10 +62,12 @@ Run this tool when:
 
 The script:
 
-1. Reads Willhaben URLs from `config.yaml`
+1. Reads Willhaben and WG-Gesucht URLs from `config.yaml`
 2. Crawls the **first page** of each search URL
-3. Extracts all current listings (typically 20-30 per URL)
-4. Marks each listing in all three tracking systems
+3. Extracts all current listings (typically 20-30 per URL depending on platform)
+4. Marks each listing in the appropriate tracking systems:
+   - **Willhaben**: processed_ids.db, contacted_titles, and ~/.willhaben_contacted.json
+   - **WG-Gesucht**: processed_ids.db and contacted_titles only
 
 ## Output Example
 
@@ -72,37 +79,53 @@ Blacklist Online Listings Tool
 Loading configuration from /usr/src/app/config.yaml
 Found 1 Willhaben URL(s) in config:
   - https://www.willhaben.at/iad/immobilien/mietwohnungen/...
+Found 1 WG-Gesucht URL(s) in config:
+  - https://www.wg-gesucht.de/wohnungen-in-Wien.163.2.1.0.html
 
 Fetching listings from configured URLs...
+
+--- Willhaben ---
 
 Crawling: https://www.willhaben.at/iad/immobilien/mietwohnungen/...
   Found 25 listings
 
+--- WG-Gesucht ---
+
+Crawling: https://www.wg-gesucht.de/wohnungen-in-Wien.163.2.1.0.html
+  Found 20 listings
+
 ============================================================
-Total listings to blacklist: 25
+Total listings to blacklist: 45
 ============================================================
 
-[1/25] ID: 123456789
+[1/45] Willhaben - ID: 123456789
   Title: 2-Zimmer Wohnung in Wien 6. Bezirk...
   URL: https://www.willhaben.at/iad/immobilien/...
   → NEW - will be blacklisted
 
-[2/25] ID: 987654321
+[2/45] Willhaben - ID: 987654321
   Title: Schöne 3-Zimmer Wohnung...
   URL: https://www.willhaben.at/iad/immobilien/...
   ✓ Already in processed_ids
   ✓ Already in contacted_titles
+
+[26/45] WgGesucht - ID: 555123456
+  Title: WG-Zimmer in Wien 1. Bezirk...
+  URL: https://www.wg-gesucht.de/wohnungen-in-Wien.555123456.html
+  → NEW - will be blacklisted
 
 ...
 
 ============================================================
 SUMMARY
 ============================================================
-Total listings found:           25
-Already in processed_ids:       10
-Already in contacted_titles:    8
-Already in willhaben cache:     7
-Newly blacklisted:              5
+Total listings found:           45
+  - Willhaben:                  25
+  - WG-Gesucht:                 20
+Already in processed_ids:       15
+Already in contacted_titles:    12
+Already in willhaben cache:     8
+Newly blacklisted:              10
 
 ✓ All listings have been blacklisted successfully!
 ============================================================
@@ -135,19 +158,27 @@ When run without `--dry-run`, the script modifies:
 
 The script uses the existing Flathunter infrastructure:
 
-- **Crawler**: Uses `flathunter.crawler.willhaben.Willhaben` to fetch listings
+- **Crawlers**:
+  - `flathunter.crawler.willhaben.Willhaben` for Willhaben listings
+  - `flathunter.crawler.wggesucht.WgGesucht` for WG-Gesucht listings
 - **Config**: Reads from `config.yaml` (same as main Flathunter)
 - **Tracking**: Uses `flathunter.idmaintainer.IdMaintainer` for database operations
 
+### Platform-Specific Handling
+
+- **Willhaben**: Marks in SQLite DB + JSON cache file
+- **WG-Gesucht**: Marks in SQLite DB only (no separate cache file)
+
 ## Troubleshooting
 
-### "No Willhaben URLs found in config"
+### "No Willhaben or WG-Gesucht URLs found in config"
 
-Make sure your `config.yaml` contains at least one Willhaben URL in the `urls` section:
+Make sure your `config.yaml` contains at least one Willhaben or WG-Gesucht URL in the `urls` section:
 
 ```yaml
 urls:
   - https://www.willhaben.at/iad/immobilien/mietwohnungen/...
+  - https://www.wg-gesucht.de/wohnungen-in-Wien.163.2.1.0.html
 ```
 
 ### "ModuleNotFoundError: No module named 'dotenv'"

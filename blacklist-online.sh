@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Wrapper script to blacklist all currently online Willhaben listings
+# Wrapper script to blacklist all currently online Willhaben and WG-Gesucht listings
 #
 # This script runs the blacklist_online_listings.py script inside the Docker container
 # to ensure all dependencies are available.

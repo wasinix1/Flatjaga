@@ -2,9 +2,10 @@
 """
 Blacklist Online Listings Script
 
-This script fetches all currently online Willhaben listings from the configured URLs
-and marks them as already seen/contacted in all tracking systems. This prevents
-accidentally spamming contacts if the database files get cleaned up during updates.
+This script fetches all currently online listings from Willhaben and WG-Gesucht
+from the configured URLs and marks them as already seen/contacted in all tracking
+systems. This prevents accidentally spamming contacts if the database files get
+cleaned up during updates.
 
 Usage:
     python blacklist_online_listings.py [--dry-run]
@@ -24,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flathunter.config import Config
 from flathunter.idmaintainer import IdMaintainer
 from flathunter.crawler.willhaben import Willhaben
+from flathunter.crawler.wggesucht import WgGesucht
 import json
 import logging
 
@@ -66,38 +68,59 @@ def blacklist_online_listings(dry_run=False):
     logger.info(f"Loading configuration from {config_path}")
     config = Config(str(config_path))
 
-    # Get Willhaben URLs from config
+    # Separate URLs by platform
     willhaben_urls = [url for url in config.urls() if 'willhaben.at' in url]
+    wg_gesucht_urls = [url for url in config.urls() if 'wg-gesucht.de' in url]
 
-    if not willhaben_urls:
-        logger.warning("No Willhaben URLs found in config!")
+    if not willhaben_urls and not wg_gesucht_urls:
+        logger.warning("No Willhaben or WG-Gesucht URLs found in config!")
         return 0
 
     logger.info(f"Found {len(willhaben_urls)} Willhaben URL(s) in config:")
     for url in willhaben_urls:
         logger.info(f"  - {url}")
 
+    logger.info(f"Found {len(wg_gesucht_urls)} WG-Gesucht URL(s) in config:")
+    for url in wg_gesucht_urls:
+        logger.info(f"  - {url}")
+
     # Initialize tracking systems
     id_watch = IdMaintainer(f'{config.database_location()}/processed_ids.db')
     willhaben_cache = load_willhaben_contacted_cache()
-
-    # Initialize Willhaben crawler
-    crawler = Willhaben(config)
 
     # Collect all listings
     all_listings = []
     logger.info("\nFetching listings from configured URLs...")
 
-    for url in willhaben_urls:
-        logger.info(f"\nCrawling: {url}")
-        try:
-            # Crawl the URL (just first page to get current listings)
-            listings = crawler.get_results(url, max_pages=1)
-            logger.info(f"  Found {len(listings)} listings")
-            all_listings.extend(listings)
-        except Exception as e:
-            logger.error(f"  Error crawling URL: {e}")
-            continue
+    # Crawl Willhaben URLs
+    if willhaben_urls:
+        logger.info("\n--- Willhaben ---")
+        willhaben_crawler = Willhaben(config)
+        for url in willhaben_urls:
+            logger.info(f"\nCrawling: {url}")
+            try:
+                # Crawl the URL (just first page to get current listings)
+                listings = willhaben_crawler.get_results(url, max_pages=1)
+                logger.info(f"  Found {len(listings)} listings")
+                all_listings.extend(listings)
+            except Exception as e:
+                logger.error(f"  Error crawling URL: {e}")
+                continue
+
+    # Crawl WG-Gesucht URLs
+    if wg_gesucht_urls:
+        logger.info("\n--- WG-Gesucht ---")
+        wg_gesucht_crawler = WgGesucht(config)
+        for url in wg_gesucht_urls:
+            logger.info(f"\nCrawling: {url}")
+            try:
+                # Crawl the URL (just first page to get current listings)
+                listings = wg_gesucht_crawler.get_results(url, max_pages=1)
+                logger.info(f"  Found {len(listings)} listings")
+                all_listings.extend(listings)
+            except Exception as e:
+                logger.error(f"  Error crawling URL: {e}")
+                continue
 
     if not all_listings:
         logger.warning("\nNo listings found to blacklist!")
@@ -110,9 +133,11 @@ def blacklist_online_listings(dry_run=False):
     # Statistics
     stats = {
         'total': len(all_listings),
+        'willhaben': 0,
+        'wg_gesucht': 0,
         'already_processed': 0,
         'already_contacted_title': 0,
-        'already_in_cache': 0,
+        'already_in_willhaben_cache': 0,
         'newly_blacklisted': 0
     }
 
@@ -121,15 +146,26 @@ def blacklist_online_listings(dry_run=False):
         listing_id = listing.get('id')
         listing_title = listing.get('title', 'N/A')
         listing_url = listing.get('url', 'N/A')
+        platform = listing.get('crawler', 'Unknown')
 
-        logger.info(f"[{i}/{len(all_listings)}] ID: {listing_id}")
+        # Track platform statistics
+        if platform == 'Willhaben':
+            stats['willhaben'] += 1
+        elif platform == 'WgGesucht':
+            stats['wg_gesucht'] += 1
+
+        logger.info(f"[{i}/{len(all_listings)}] {platform} - ID: {listing_id}")
         logger.info(f"  Title: {listing_title[:60]}...")
         logger.info(f"  URL: {listing_url}")
 
         # Check current status
         already_processed = id_watch.is_processed(listing_id)
         already_contacted = id_watch.is_title_contacted(listing_title)
-        already_cached = str(listing_id) in willhaben_cache
+
+        # Only check Willhaben cache for Willhaben listings
+        already_cached = False
+        if platform == 'Willhaben':
+            already_cached = str(listing_id) in willhaben_cache
 
         if already_processed:
             logger.info(f"  ✓ Already in processed_ids")
@@ -141,7 +177,7 @@ def blacklist_online_listings(dry_run=False):
 
         if already_cached:
             logger.info(f"  ✓ Already in willhaben cache")
-            stats['already_in_cache'] += 1
+            stats['already_in_willhaben_cache'] += 1
 
         # Check if this is new to all systems
         is_new = not (already_processed or already_contacted or already_cached)
@@ -151,15 +187,18 @@ def blacklist_online_listings(dry_run=False):
             logger.info(f"  → NEW - will be blacklisted")
 
             if not dry_run:
-                # Mark in all tracking systems
+                # Mark in database tracking systems (both platforms)
                 id_watch.mark_processed(listing_id)
                 id_watch.mark_title_contacted(listing)
-                willhaben_cache.add(str(listing_id))
+
+                # Only add to Willhaben cache for Willhaben listings
+                if platform == 'Willhaben':
+                    willhaben_cache.add(str(listing_id))
 
         logger.info("")  # Blank line for readability
 
-    # Save the updated cache
-    if not dry_run:
+    # Save the updated cache (only if there were Willhaben listings)
+    if not dry_run and stats['willhaben'] > 0:
         save_willhaben_contacted_cache(willhaben_cache)
         logger.info("✓ Updated Willhaben contacted cache")
 
@@ -168,9 +207,11 @@ def blacklist_online_listings(dry_run=False):
     logger.info("SUMMARY")
     logger.info(f"{'='*60}")
     logger.info(f"Total listings found:           {stats['total']}")
+    logger.info(f"  - Willhaben:                  {stats['willhaben']}")
+    logger.info(f"  - WG-Gesucht:                 {stats['wg_gesucht']}")
     logger.info(f"Already in processed_ids:       {stats['already_processed']}")
     logger.info(f"Already in contacted_titles:    {stats['already_contacted_title']}")
-    logger.info(f"Already in willhaben cache:     {stats['already_in_cache']}")
+    logger.info(f"Already in willhaben cache:     {stats['already_in_willhaben_cache']}")
     logger.info(f"Newly blacklisted:              {stats['newly_blacklisted']}")
 
     if dry_run:
@@ -186,7 +227,7 @@ def blacklist_online_listings(dry_run=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Blacklist all currently online Willhaben listings'
+        description='Blacklist all currently online Willhaben and WG-Gesucht listings'
     )
     parser.add_argument(
         '--dry-run',
