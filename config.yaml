@@ -13,7 +13,7 @@
 # Individual crawler delays below are ADDED ON TOP of this base delay.
 loop:
   active: yes
-  sleeping_time: 60          # Base delay (default for all crawlers)
+  sleeping_time: 40          # Base delay (default for all crawlers)
   random_jitter: true
 
 # Per-crawler ADDITIONAL delay settings to avoid rate limiting
@@ -26,12 +26,12 @@ loop:
 #
 # Times are in seconds.
 crawler_delays:
-  immobilienscout: 540       # +9 minutes (total: 10 minutes with base 60s) - strict rate limiting
-  wggesucht: 240             # +4 minutes (total: 5 minutes with base 60s) - moderate rate limiting
-  wg_gesucht: 240            # +4 minutes (alternate name)
-  willhaben: 120             # +2 minutes (total: 3 minutes with base 60s) - less strict
-  immowelt: 240              # +4 minutes (total: 5 minutes with base 60s) - moderate
-  kleinanzeigen: 240         # +4 minutes (total: 5 minutes with base 60s) - moderate
+  immobilienscout: 260      
+  wggesucht: 15             
+  wg_gesucht: 240            
+  willhaben: 1            
+  immowelt: 240              
+  kleinanzeigen: 240         
 
 # Location of the Database to store already seen offerings
 # Defaults to the current directory
@@ -47,6 +47,7 @@ crawler_delays:
 urls:
 - https://www.wg-gesucht.de/wohnungen-in-Wien.163.2.1.0.html?offer_filter=1&city_id=163&sort_order=0&noDeact=1&categories%5B%5D=2&rent_types%5B%5D=2&sMin=55&rMax=1000
 - https://www.willhaben.at/iad/immobilien/mietwohnungen/mietwohnung-angebote?sfId=bd9595b8-10a8-47ab-a409-0cbb1e257a27&isNavigation=true&areaId=900&NO_OF_ROOMS_BUCKET=2X2&NO_OF_ROOMS_BUCKET=3X3&PRICE_TO=1000&ESTATE_SIZE/LIVING_AREA_FROM=55
+- https://www.immobilienscout24.de/Suche/at/wien/wien/wohnung-mieten?price=-1000.0&pricetype=rentpermonth&enteredFrom=result_list
 
 # Define filters to exclude flats that don't meet your critera.
 # Supported filters include 'max_rooms', 'min_rooms', 'max_size', 'min_size',
@@ -67,7 +68,14 @@ urls:
 #   max_size: 80
 #   max_price_per_square: 1000
 filters:
-
+  excluded_titles:
+  - "zwischenmiete"
+  - "gemeindebau"
+  - "erstbezug"
+  min_price: 550
+  max_price: 1000
+  min_size: 55
+  max_size: 100
 # If an expose includes an address, the bot is capable of
 # displaying the distance and time to travel (duration) to
 # some configured other addresses, for specific kinds of
@@ -182,6 +190,8 @@ telegram:
   bot_token: 7480863939:AAFuYZOVs0VkQe9sWK7oeyZp1uVkzozcgTQ
   receiver_ids:
   - '5596643027'
+  - '-4791287303'
+
 
 # Sending messages via mattermost requires a webhook url provided by a
 # mattermost server. You can find a description how to set up a webhook with
