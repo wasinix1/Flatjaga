@@ -8,12 +8,16 @@ import time
 import random
 import json
 import os
+import logging
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from .stealth_driver import StealthDriver
+
+logger = logging.getLogger(__name__)
 
 
 class SessionExpiredException(Exception):
@@ -24,25 +28,18 @@ class SessionExpiredException(Exception):
 class WillhabenContactBot:
     def __init__(self, headless=False):
         """
-        Initialize the bot with Chrome WebDriver
-        
+        Initialize the bot with Stealth Chrome WebDriver
+
         Args:
             headless: Run Chrome in headless mode (no visible browser)
         """
-        self.options = webdriver.ChromeOptions()
-        
-        if headless:
-            self.options.add_argument('--headless')
-        
-        # Make it look more like a real browser
-        self.options.add_argument('--disable-blink-features=AutomationControlled')
-        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        self.options.add_experimental_option('useAutomationExtension', False)
-        
+        self.headless = headless
+        self.stealth_driver = None
         self.driver = None
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
         self.contacted_file = Path.home() / '.willhaben_contacted.json'
         self.contacted_listings = self._load_contacted_listings()
+        logger.info("Willhaben bot initialized (stealth mode enabled)")
     
     def _load_contacted_listings(self):
         """Load the list of already contacted listing IDs"""
@@ -59,7 +56,11 @@ class WillhabenContactBot:
     
     def _random_delay(self, min_sec=0.5, max_sec=2.0):
         """Add a random delay to simulate human behavior"""
-        time.sleep(random.uniform(min_sec, max_sec))
+        # Delegate to stealth driver's smart_delay for better human-like behavior
+        if self.stealth_driver:
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            time.sleep(random.uniform(min_sec, max_sec))
     
     def accept_cookies(self):
         """Accept cookie banner if it appears - optimized for speed"""
@@ -108,15 +109,21 @@ class WillhabenContactBot:
             return False
     
     def start(self):
-        """Start the Chrome WebDriver"""
-        self.driver = webdriver.Chrome(options=self.options)
-        print("✓ Browser started")
+        """Start the Stealth Chrome WebDriver"""
+        self.stealth_driver = StealthDriver(headless=self.headless)
+        self.stealth_driver.start()
+        self.driver = self.stealth_driver.driver
+        print("✓ Stealth browser started")
+        logger.info("Stealth browser started for Willhaben")
     
     def close(self):
         """Close the browser"""
-        if self.driver:
+        if self.stealth_driver:
+            self.stealth_driver.quit()
+        elif self.driver:
             self.driver.quit()
-            print("✓ Browser closed")
+        print("✓ Browser closed")
+        logger.info("Browser closed")
     
     def save_cookies(self):
         """Save cookies to file for session persistence"""

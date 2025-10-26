@@ -17,6 +17,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
+from .stealth_driver import StealthDriver
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,19 @@ class WgGesuchtContactBot:
     def __init__(self, headless=True, template_index=0):
         """
         Initialize bot with session management.
-        
+
         Args:
             headless: Run browser in headless mode (default True)
             template_index: Which template to use (default 0 = first)
         """
         self.headless = headless
         self.template_index = template_index
-        self.driver = None
+        self.stealth_driver = StealthDriver(headless=headless)
         self.session_valid = False
+
+        logger.info("Initializing WG-Gesucht bot with stealth...")
+        self.stealth_driver.start()
+        self.driver = self.stealth_driver.driver
         
         logger.info("Initializing WG-Gesucht bot...")
 
@@ -71,21 +76,11 @@ class WgGesuchtContactBot:
 
     def _random_delay(self, min_sec=0.5, max_sec=1.5):
         """Add random delay to mimic human behavior."""
-        time.sleep(random.uniform(min_sec, max_sec))
-    
-    def _init_driver(self):
-        """Create Selenium driver."""
-        chrome_options = Options()
-        if self.headless:
-            chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        
-        self.driver = webdriver.Chrome(options=chrome_options)
-        logger.info("Chrome driver initialized")
+        # Delegate to stealth driver's smart_delay for better human-like behavior
+        if hasattr(self, 'stealth_driver') and self.stealth_driver:
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            time.sleep(random.uniform(min_sec, max_sec))
     
     def _load_or_login(self):
         """Load saved session or prompt for manual login."""
@@ -365,7 +360,9 @@ class WgGesuchtContactBot:
     
     def close(self):
         """Close browser."""
-        if self.driver:
+        if hasattr(self, 'stealth_driver') and self.stealth_driver:
+            self.stealth_driver.quit()
+        elif self.driver:
             self.driver.quit()
             logger.info("Browser closed")
 
