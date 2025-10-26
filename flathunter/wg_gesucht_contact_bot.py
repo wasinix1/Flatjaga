@@ -9,6 +9,7 @@ import json
 import os
 import random
 from datetime import datetime
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -16,11 +17,22 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
+from .stealth_driver import StealthDriver
 
 logger = logging.getLogger(__name__)
 
-COOKIE_FILE = 'wg_gesucht_cookies.json'
+COOKIE_FILE = str(Path.home() / '.wg_gesucht_cookies.json')
 WG_GESUCHT_URL = 'https://www.wg-gesucht.de'
+
+
+class SessionExpiredException(Exception):
+    """Raised when WG-Gesucht session has expired and re-login is required."""
+    pass
+
+
+class ContactFailedException(Exception):
+    """Raised when contact flow fails for any reason."""
+    pass
 
 
 class WgGesuchtContactBot:
@@ -46,7 +58,17 @@ class WgGesuchtContactBot:
         self.driver = None
         self.session_valid = False
 
+        self.stealth_driver = StealthDriver(headless=headless)
+        self.session_valid = False
+
+        logger.info("Initializing WG-Gesucht bot with stealth...")
+        self.stealth_driver.start()
+        self.driver = self.stealth_driver.driver
+        
         logger.info("Initializing WG-Gesucht bot...")
+
+    def start(self):
+        """Start the bot and initialize the driver."""
         self._init_driver()
         self._load_or_login()
     
@@ -76,6 +98,23 @@ class WgGesuchtContactBot:
         
         self.driver = webdriver.Chrome(options=chrome_options)
         logger.info("Chrome driver initialized")
+
+    def load_cookies(self):
+        """Load saved session cookies. Returns True if session is valid."""
+        if os.path.exists(COOKIE_FILE):
+            logger.info("Found saved session, loading cookies...")
+            return self._load_cookies()
+        else:
+            logger.warning("No saved session found")
+            return False
+
+    def _random_delay(self, min_sec=0.5, max_sec=1.5):
+        """Add random delay to mimic human behavior."""
+        # Delegate to stealth driver's smart_delay for better human-like behavior
+        if hasattr(self, 'stealth_driver') and self.stealth_driver:
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            time.sleep(random.uniform(min_sec, max_sec))
     
     def _load_or_login(self):
         """Load saved session or prompt for manual login."""
@@ -123,14 +162,36 @@ class WgGesuchtContactBot:
             return False
     
     def _validate_session(self):
-        """Check if session is valid by looking for logged-in elements."""
+        """
+        Check if session is valid by looking for logged-in elements.
+        More robust validation - checks multiple indicators.
+        """
         try:
             # Look for "Mein Konto" link (only visible when logged in)
             WebDriverWait(self.driver, 3).until(
                 EC.presence_of_element_located((By.LINK_TEXT, "Mein Konto"))
             )
-            return True
-        except:
+
+            # Additional check: verify we're not on login page
+            if 'login' in self.driver.current_url.lower():
+                logger.warning("Session validation failed - on login page")
+                return False
+
+            # Check for logout link as additional confirmation
+            try:
+                self.driver.find_element(By.LINK_TEXT, "Logout")
+                logger.info("Session validated - user is logged in")
+                return True
+            except NoSuchElementException:
+                # Mein Konto exists but no logout - unusual but accept it
+                logger.info("Session validated - Mein Konto found")
+                return True
+
+        except TimeoutException:
+            logger.warning("Session validation failed - Mein Konto not found")
+            return False
+        except Exception as e:
+            logger.error(f"Session validation error: {e}")
             return False
     
     def _login_manual(self):
@@ -192,7 +253,7 @@ class WgGesuchtContactBot:
         
         if not self.session_valid:
             logger.error("Session invalid - cannot contact listing")
-            return False
+            raise SessionExpiredException("Session is not valid - re-login required")
         
         try:
             logger.info(f"Contacting listing: {listing_url}")
@@ -213,7 +274,7 @@ class WgGesuchtContactBot:
             if 'login' in self.driver.current_url.lower():
                 logger.error("Session expired - redirected to login")
                 self.session_valid = False
-                return False
+                raise SessionExpiredException("Session expired - redirected to login page")
             
             # Cookie popup
             try:
@@ -333,7 +394,9 @@ class WgGesuchtContactBot:
     
     def close(self):
         """Close browser."""
-        if self.driver:
+        if hasattr(self, 'stealth_driver') and self.stealth_driver:
+            self.stealth_driver.quit()
+        elif self.driver:
             self.driver.quit()
             logger.info("Browser closed")
 
