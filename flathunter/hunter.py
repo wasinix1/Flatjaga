@@ -29,11 +29,11 @@ class Hunter:
         if 'telegram' in self.config.notifiers():
             self.telegram_notifier = SenderTelegram(self.config)
 
-        # Initialize willhaben processor with telegram notifier
-        self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier)
+        # Initialize willhaben processor with telegram notifier and id_watch
+        self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier, id_watch)
 
-        # Initialize wg-gesucht processor
-        self.wg_gesucht_processor = WgGesuchtContactProcessor(config)
+        # Initialize wg-gesucht processor with id_watch
+        self.wg_gesucht_processor = WgGesuchtContactProcessor(config, id_watch)
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a willhaben listing is successfully contacted"""

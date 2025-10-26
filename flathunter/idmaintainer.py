@@ -3,6 +3,7 @@ import threading
 import sqlite3 as lite
 import datetime
 import json
+import re
 
 from flathunter.logging import logger
 from flathunter.abstract_processor import Processor
@@ -46,6 +47,9 @@ class IdMaintainer:
                                     crawler STRING, details BLOB, PRIMARY KEY (id, crawler))')
                 cur.execute('CREATE TABLE IF NOT EXISTS users \
                                     (id INTEGER PRIMARY KEY, settings BLOB)')
+                cur.execute('CREATE TABLE IF NOT EXISTS contacted_titles \
+                                    (normalized_title TEXT PRIMARY KEY, original_title TEXT, \
+                                    listing_id INTEGER, crawler TEXT, contacted_at TIMESTAMP, listing_url TEXT)')
                 self.threadlocal.connection.commit()
             except lite.Error as error:
                 logger.error("Error %s:", error.args[0])
@@ -66,6 +70,107 @@ class IdMaintainer:
         cur = self.get_connection().cursor()
         cur.execute('INSERT INTO processed VALUES(?)', (expose_id,))
         self.get_connection().commit()
+
+    @staticmethod
+    def normalize_title(title):
+        """
+        Normalize a listing title for cross-reference matching.
+        Removes noise and creates a canonical form for comparison.
+        """
+        if not title:
+            return ""
+
+        # Convert to lowercase
+        normalized = title.lower()
+
+        # Remove common location markers (case-insensitive)
+        location_words = [
+            'wien', 'vienna', 'österreich', 'austria',
+            'bezirk', 'district', 'nähe', 'near'
+        ]
+        for word in location_words:
+            normalized = re.sub(r'\b' + word + r'\b', '', normalized, flags=re.IGNORECASE)
+
+        # Remove measurements and units
+        normalized = re.sub(r'\d+\s*m[²2]', '', normalized)  # Remove "50 m²" or "50m2"
+        normalized = re.sub(r'\d+\s*qm', '', normalized)  # Remove "50 qm"
+
+        # Remove price indicators
+        normalized = re.sub(r'[€$]\s*\d+', '', normalized)  # Remove "€ 800" or "$800"
+        normalized = re.sub(r'\d+\s*[€$]', '', normalized)  # Remove "800 €"
+        normalized = re.sub(r'\d+\s*eur', '', normalized)  # Remove "800 eur"
+
+        # Remove room indicators like "2-zimmer", "3 zimmer"
+        normalized = re.sub(r'\d+[-\s]*zimmer', '', normalized)
+        normalized = re.sub(r'\d+[-\s]*room', '', normalized)
+
+        # Remove special characters but keep spaces
+        normalized = re.sub(r'[^\w\s]', ' ', normalized)
+
+        # Collapse multiple spaces to single space
+        normalized = re.sub(r'\s+', ' ', normalized)
+
+        # Trim whitespace
+        normalized = normalized.strip()
+
+        return normalized
+
+    def is_title_contacted(self, title):
+        """
+        Check if a listing with this title has already been contacted.
+        Returns True if title was contacted before, False otherwise.
+        """
+        if not title:
+            return False
+
+        normalized = self.normalize_title(title)
+        if not normalized:
+            return False
+
+        logger.debug('is_title_contacted: checking "%s" (normalized: "%s")', title, normalized)
+        cur = self.get_connection().cursor()
+        cur.execute('SELECT normalized_title FROM contacted_titles WHERE normalized_title = ?',
+                   (normalized,))
+        row = cur.fetchone()
+
+        if row is not None:
+            logger.info('Title already contacted: "%s"', title)
+            return True
+
+        return False
+
+    def mark_title_contacted(self, expose):
+        """
+        Mark a listing title as contacted in the database.
+        Stores normalized title to prevent duplicate contacts across platforms.
+        """
+        title = expose.get('title', '')
+        if not title:
+            logger.warning('Cannot mark title as contacted: no title in expose')
+            return False
+
+        normalized = self.normalize_title(title)
+        if not normalized:
+            logger.warning('Cannot mark title as contacted: normalized title is empty')
+            return False
+
+        logger.debug('mark_title_contacted: "%s" (normalized: "%s")', title, normalized)
+
+        cur = self.get_connection().cursor()
+        try:
+            cur.execute(
+                'INSERT OR REPLACE INTO contacted_titles \
+                 (normalized_title, original_title, listing_id, crawler, contacted_at, listing_url) \
+                 VALUES (?, ?, ?, ?, ?, ?)',
+                (normalized, title, expose.get('id'), expose.get('crawler'),
+                 datetime.datetime.now(), expose.get('url', ''))
+            )
+            self.get_connection().commit()
+            logger.info('Marked title as contacted: "%s"', title)
+            return True
+        except lite.Error as error:
+            logger.error('Error marking title as contacted: %s', error.args[0])
+            return False
 
     def save_expose(self, expose):
         """Saves an expose to a database"""
