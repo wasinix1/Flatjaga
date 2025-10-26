@@ -13,6 +13,18 @@ loop:
   sleeping_time: 60
   random_jitter: true
 
+# Per-crawler delay settings to avoid rate limiting
+# Different sites have different rate limit policies, so we can configure
+# different delays for each crawler. Times are in seconds.
+crawler_delays:
+  default: 60                # Default delay for crawlers not listed below
+  immobilienscout: 600       # 10 minutes - strict rate limiting
+  wggesucht: 300             # 5 minutes - moderate rate limiting
+  wg_gesucht: 300            # 5 minutes - alternate name
+  willhaben: 180             # 3 minutes - less strict
+  immowelt: 300              # 5 minutes - moderate
+  kleinanzeigen: 300         # 5 minutes - moderate
+
 # Location of the Database to store already seen offerings
 # Defaults to the current directory
 #database_location: /path/to/database

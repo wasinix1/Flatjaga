@@ -1,5 +1,7 @@
 """Expose crawler for ImmobilienScout"""
 import re
+import time
+import random
 from urllib.parse import urlencode, urlparse, parse_qs
 
 import requests
@@ -15,17 +17,28 @@ class Immobilienscout(Crawler):
 
     URL_PATTERN = STATIC_URL_PATTERN
 
-    HEADERS = {
-        "Connection": "keep-alive",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "ImmoScout_27.3_26.0_._"
-    }
+    # Rotate user agents to avoid detection
+    MOBILE_USER_AGENTS = [
+        "ImmoScout_27.3_26.0_._",
+        "ImmoScout_27.4_26.1_._",
+        "ImmoScout_27.2_25.9_._",
+        "ImmoScout_28.0_27.0_._",
+        "ImmoScout_27.5_26.2_._",
+    ]
 
     RESULT_LIMIT = 50
 
     FALLBACK_IMAGE_URL = "https://www.static-immobilienscout24.de/statpic/placeholder_house/" + \
                          "496c95154de31a357afa978cdb7f15f0_placeholder_medium.png"
+
+    def get_headers(self) -> dict:
+        """Get headers with a random user agent to avoid detection"""
+        return {
+            "Connection": "keep-alive",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": random.choice(self.MOBILE_USER_AGENTS)
+        }
 
 
     def get_immoscout_query(self, search_url: str) -> ImmoscoutQuery:
@@ -75,20 +88,65 @@ class Immobilienscout(Crawler):
                 query_dict[k] = ",".join(v)
         return api_url + urlencode(query_dict)
 
-    def fetch_api_data(self, search_url: str, page_no: int | None = None) -> requests.Response:
-        """Applies a page number to a formatted API URL and fetches the exposes at that page"""
+    def fetch_api_data(self, search_url: str, page_no: int | None = None,
+                      retry_count: int = 0) -> requests.Response:
+        """Applies a page number to a formatted API URL and fetches the exposes at that page
+
+        Implements exponential backoff with jitter for retries to avoid rate limiting.
+
+        Args:
+            search_url: API URL with page number placeholder
+            page_no: Page number to fetch
+            retry_count: Current retry attempt (for internal use)
+
+        Returns:
+            Response object from the API
+
+        Raises:
+            requests.exceptions.RequestException: If all retries are exhausted
+        """
+        max_retries = 3
+        base_delay = 5  # seconds
 
         data = {
             "supportedResultListType": [],
             "userData": {}
         }
-        response = requests.post(
-            search_url.format(page_no),
-            headers=self.HEADERS,
-            json=data,
-            timeout=30
-        )
-        return response
+
+        try:
+            response = requests.post(
+                search_url.format(page_no),
+                headers=self.get_headers(),
+                json=data,
+                timeout=30
+            )
+
+            # Check for rate limiting (HTTP 429) or server errors (5xx)
+            if response.status_code == 429:
+                logger.warning("ImmoScout rate limit hit (HTTP 429)")
+                raise requests.exceptions.RequestException("Rate limited")
+            elif response.status_code >= 500:
+                logger.warning(f"ImmoScout server error (HTTP {response.status_code})")
+                raise requests.exceptions.RequestException("Server error")
+
+            return response
+
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as exc:
+            if retry_count >= max_retries:
+                logger.error(
+                    f"ImmoScout API failed after {max_retries} retries - likely rate limited or down"
+                )
+                raise
+
+            # Exponential backoff with jitter to avoid thundering herd
+            delay = base_delay * (2 ** retry_count) + random.uniform(0, 3)
+            logger.warning(
+                f"ImmoScout request failed ({type(exc).__name__}), "
+                f"retrying in {delay:.1f}s (attempt {retry_count + 1}/{max_retries})"
+            )
+            time.sleep(delay)
+
+            return self.fetch_api_data(search_url, page_no, retry_count + 1)
 
     def extract_data(self, raw_data: dict) -> list:
         """Extracts all exposes from a JSON dictionary"""
@@ -153,6 +211,12 @@ class Immobilienscout(Crawler):
             logger.debug(
                 '(Next page) Number of entries: %d / Number of results: %d',
                 len(entries), no_of_results)
+
+            # Add delay between pages to avoid rate limiting (2-4 seconds)
+            delay = random.uniform(2.0, 4.0)
+            logger.debug(f"Waiting {delay:.1f}s before fetching next page")
+            time.sleep(delay)
+
             page_no += 1
             listings = self.fetch_api_data(api_url, page_no).json()
             cur_entries = self.extract_data(listings)

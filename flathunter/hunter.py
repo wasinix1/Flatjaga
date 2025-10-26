@@ -1,5 +1,6 @@
 """Default Flathunter implementation for the command line"""
 import traceback
+import time
 from itertools import chain
 import requests
 
@@ -24,6 +25,9 @@ class Hunter:
                 "Invalid config for hunter - should be a 'Config' object")
         self.id_watch = id_watch
 
+        # Track last crawl time per crawler to implement per-site delays
+        self.last_crawl_times = {}
+
         # Initialize telegram notifier for success/failure notifications
         self.telegram_notifier = None
         if 'telegram' in self.config.notifiers():
@@ -35,6 +39,55 @@ class Hunter:
         # Initialize wg-gesucht processor with telegram notifier and id_watch
         self.wg_gesucht_processor = WgGesuchtContactProcessor(config, self.telegram_notifier, id_watch)
 
+
+    def get_crawler_delay(self, crawler_name: str) -> int:
+        """Get the delay in seconds for a specific crawler from config
+
+        Args:
+            crawler_name: Name of the crawler (e.g., 'Immobilienscout')
+
+        Returns:
+            Delay in seconds before this crawler should be run again
+        """
+        delays = self.config.get('crawler_delays', {})
+        default_delay = delays.get('default', 60)
+
+        # Normalize crawler name: lowercase and remove underscores
+        crawler_key = crawler_name.lower().replace('_', '')
+
+        return delays.get(crawler_key, default_delay)
+
+    def should_crawl(self, crawler_name: str) -> bool:
+        """Check if enough time has passed since last crawl for this crawler
+
+        Args:
+            crawler_name: Name of the crawler
+
+        Returns:
+            True if enough time has passed, False otherwise
+        """
+        last_crawl = self.last_crawl_times.get(crawler_name, 0)
+        delay = self.get_crawler_delay(crawler_name)
+        elapsed = time.time() - last_crawl
+
+        if elapsed < delay:
+            remaining = delay - elapsed
+            logger.debug(
+                f"Skipping {crawler_name} - only {elapsed:.0f}s elapsed, "
+                f"{remaining:.0f}s remaining until next crawl"
+            )
+            return False
+
+        return True
+
+    def mark_crawler_crawled(self, crawler_name: str):
+        """Mark that a crawler has been crawled at the current time
+
+        Args:
+            crawler_name: Name of the crawler
+        """
+        self.last_crawl_times[crawler_name] = time.time()
+        logger.debug(f"Marked {crawler_name} as crawled at {time.time()}")
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a listing is successfully contacted"""
@@ -58,15 +111,29 @@ class Hunter:
             logger.error(f"✗ Failed to send success notification for {title}: {e}", exc_info=True)
 
     def crawl_for_exposes(self, max_pages=None):
-        """Trigger a new crawl of the configured URLs"""
+        """Trigger a new crawl of the configured URLs with per-crawler rate limiting"""
         def try_crawl(searcher, url, max_pages):
+            crawler_name = searcher.get_name()
+
+            # Check if enough time has passed for this crawler
+            if not self.should_crawl(crawler_name):
+                return []
+
             try:
-                return searcher.crawl(url, max_pages)
+                logger.info(f"Crawling {crawler_name}: {url}")
+                results = searcher.crawl(url, max_pages)
+                # Mark crawler as crawled after successful crawl
+                self.mark_crawler_crawled(crawler_name)
+                return results
             except CaptchaUnsolvableError:
                 logger.info("Error while scraping url %s: the captcha was unsolvable", url)
+                # Mark as crawled even on error to avoid hammering
+                self.mark_crawler_crawled(crawler_name)
                 return []
             except requests.exceptions.RequestException:
                 logger.info("Error while scraping url %s:\n%s", url, traceback.format_exc())
+                # Mark as crawled even on error to avoid hammering
+                self.mark_crawler_crawled(crawler_name)
                 return []
 
         return chain(*[try_crawl(searcher, url, max_pages)
