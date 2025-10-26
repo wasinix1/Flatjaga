@@ -111,14 +111,23 @@ class WillhabenContactProcessor:
             return True
 
         try:
-            logger.info("Starting willhaben contact bot (headless)...")
-            self.bot = WillhabenContactBot(headless=True)
+            # Get config values with defaults
+            headless = self.config.get('willhaben_headless', True)
+            delay_min = self.config.get('willhaben_delay_min', 0.5)
+            delay_max = self.config.get('willhaben_delay_max', 2.0)
+
+            logger.info(f"Starting willhaben contact bot (headless={headless}, delays={delay_min}-{delay_max}s)...")
+            self.bot = WillhabenContactBot(
+                headless=headless,
+                delay_min=delay_min,
+                delay_max=delay_max
+            )
             self.bot.start()
 
             if not self.bot.load_cookies():
                 logger.warning(
                     "No willhaben session found. "
-                    "Run 'python willhaben_contact_bot.py' to login first."
+                    "Run 'python setup_sessions.py' to login first."
                 )
                 return False
 
@@ -185,7 +194,7 @@ class WillhabenContactProcessor:
             except SessionExpiredException as e:
                 elapsed = time.time() - start_time
                 self.total_errors += 1
-                logger.error(f"Session expired ({elapsed:.1f}s) - run 'python willhaben_contact_bot.py' to re-login")
+                logger.error(f"Session expired ({elapsed:.1f}s) - run 'python setup_sessions.py' to re-login")
                 expose['_auto_contacted'] = False
 
                 # Log failure with special category
