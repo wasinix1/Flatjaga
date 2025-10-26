@@ -4,7 +4,6 @@ Production-ready stealth browser for apartment hunting
 """
 
 import undetected_chromedriver as uc
-from fake_useragent import UserAgent
 import random
 import time
 import logging
