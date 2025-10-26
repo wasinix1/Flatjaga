@@ -1,4 +1,5 @@
 """Default Flathunter implementation for the command line"""
+import re
 import traceback
 import time
 from itertools import chain
@@ -158,22 +159,23 @@ class Hunter:
         def try_crawl(searcher, url, max_pages):
             crawler_name = searcher.get_name()
 
+            # Skip if URL doesn't match this crawler's pattern
+            if not re.search(searcher.URL_PATTERN, url):
+                return []
+
             # Check if enough time has passed for this crawler
             if not self.should_crawl(crawler_name):
                 return []
 
             try:
-                logger.info(f"Crawling {crawler_name}: {url}")
                 results = searcher.crawl(url, max_pages)
                 # Mark crawler as crawled after successful crawl
                 self.mark_crawler_crawled(crawler_name)
                 # Record success with result count
                 self._record_crawler_success(crawler_name, len(results))
-                logger.info(f"✓ {crawler_name} crawled successfully - found {len(results)} results")
                 return results
             except CaptchaUnsolvableError as e:
                 error_msg = f"Captcha unsolvable"
-                logger.warning(f"✗ {crawler_name} failed: {error_msg}")
                 # Mark as crawled even on error to avoid hammering
                 self.mark_crawler_crawled(crawler_name)
                 # Record failure
@@ -181,7 +183,6 @@ class Hunter:
                 return []
             except requests.exceptions.RequestException as e:
                 error_msg = f"{type(e).__name__}: {str(e)[:100]}"
-                logger.warning(f"✗ {crawler_name} failed: {error_msg}")
                 # Mark as crawled even on error to avoid hammering
                 self.mark_crawler_crawled(crawler_name)
                 # Record failure
@@ -202,6 +203,9 @@ class Hunter:
 
     def hunt_flats(self, max_pages: None|int = None):
         """Crawl, process and filter exposes"""
+        # Reset crawler status for this hunt cycle
+        self.crawler_status = {}
+
         filter_set = Filter.builder() \
                            .read_config(self.config) \
                            .filter_already_seen(self.id_watch) \
