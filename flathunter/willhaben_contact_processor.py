@@ -15,18 +15,19 @@ from datetime import datetime
 class WillhabenContactProcessor:
     """Processor that auto-contacts willhaben listings - with crash recovery"""
 
-    def __init__(self, config, telegram_notifier=None):
+    def __init__(self, config, telegram_notifier=None, id_watch=None):
         self.config = config
         self.bot = None
         self.bot_ready = False
         self.total_contacted = 0
         self.total_errors = 0
         self.telegram_notifier = telegram_notifier
+        self.id_watch = id_watch
 
         # Setup failure log file
         self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
 
-        logger.info("Willhaben auto-contact processor initialized (with auto-recovery)")
+        logger.info("Willhaben auto-contact processor initialized (with auto-recovery, title cross-ref enabled)")
 
     def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
         """Log contact failure to file with timestamp and details"""
@@ -142,18 +143,27 @@ class WillhabenContactProcessor:
         """
         Process a single expose - contact if willhaben
         WITH AUTO-RECOVERY: Restarts browser if it crashes
+        WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
         """
         # Check if it's willhaben
         crawler = expose.get('crawler', '').lower()
         url = expose.get('url', '')
-        
+
         if 'willhaben' not in crawler and 'willhaben.at' not in url:
             return expose  # Not willhaben, pass through
-        
+
+        # Check if title was already contacted (cross-platform check)
+        if self.id_watch:
+            title = expose.get('title', '')
+            if self.id_watch.is_title_contacted(title):
+                logger.info(f"Skipping - title already contacted: {title[:50]}...")
+                expose['_auto_contacted'] = False
+                return expose
+
         # Init bot if needed
         if not self._init_bot():
             return expose  # Bot failed, pass through
-        
+
         # Try to contact (with auto-recovery)
         max_retries = 2
         for attempt in range(max_retries):
@@ -170,10 +180,14 @@ class WillhabenContactProcessor:
                     self.total_contacted += 1
                     logger.info(f"✓ Contacted successfully ({elapsed:.1f}s, total: {self.total_contacted})")
                     expose['_auto_contacted'] = True
+
+                    # Mark title as contacted to prevent duplicates across platforms
+                    if self.id_watch:
+                        self.id_watch.mark_title_contacted(expose)
                 else:
                     logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
-                
+
                 # Success - break out of retry loop
                 break
 

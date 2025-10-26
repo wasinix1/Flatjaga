@@ -13,6 +13,24 @@ from datetime import datetime
 
 
 class WgGesuchtContactProcessor:
+    """
+    Processor that contacts WG-Gesucht listings before sending notifications.
+    Follows same pattern as WillhabenContactProcessor.
+    """
+
+    def __init__(self, config, id_watch=None):
+        """
+        Initialize processor with config.
+
+        Config options:
+            wg_gesucht_auto_contact: bool - Enable auto-contact (default False)
+            wg_gesucht_template_index: int - Which template to use (default 0)
+            wg_gesucht_headless: bool - Run in headless mode (default True)
+        """
+        self.config = config
+        self.bot = None
+        self.bot_ready = False
+        self.id_watch = id_watch
     """Processor that auto-contacts WG-Gesucht listings - with crash recovery"""
 
     def __init__(self, config, telegram_notifier=None):
@@ -27,6 +45,8 @@ class WgGesuchtContactProcessor:
         self.enabled = config.get('wg_gesucht_auto_contact', False)
         self.template_index = config.get('wg_gesucht_template_index', 0)
         self.headless = config.get('wg_gesucht_headless', True)
+
+        logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled}, title cross-ref enabled)")
         self.delay_min = config.get('wg_gesucht_delay_min', 0.5)
         self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
 
@@ -184,6 +204,19 @@ class WgGesuchtContactProcessor:
 
     def process_expose(self, expose):
         """
+        Process a listing expose. If it's a WG-Gesucht listing, contact it.
+        WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
+
+        Args:
+            expose: Listing expose dict with at least 'url' field
+
+        Returns:
+            expose: Modified expose with 'contacted' flag if successful
+        """
+
+        # Check if this is a WG-Gesucht listing
+        url = expose.get('url', '')
+        crawler = expose.get('crawler', '').lower()
         Process a single expose - contact if WG-Gesucht
         WITH AUTO-RECOVERY: Restarts browser if it crashes
         WITH HEADLESS FALLBACK: Retries with headless=false if headless mode fails
@@ -195,9 +228,35 @@ class WgGesuchtContactProcessor:
         if 'wg-gesucht' not in url and 'wg_gesucht' not in crawler:
             return expose  # Not WG-Gesucht, pass through
 
+        # Check if title was already contacted (cross-platform check)
+        if self.id_watch:
+            title = expose.get('title', '')
+            if self.id_watch.is_title_contacted(title):
+                logger.info(f"Skipping - title already contacted: {title[:50]}...")
+                expose['_auto_contacted'] = False
+                return expose
+
         # Init bot if needed
         if not self._init_bot():
             return expose  # Bot failed, pass through
+
+        # Try to contact listing
+        try:
+            title = expose.get('title', 'Unknown')
+            logger.info(f"Auto-contacting WG-Gesucht listing: {title}")
+            
+            success = self.bot.send_contact_message(url)
+
+            if success:
+                logger.info("✓ Successfully contacted")
+                expose['_auto_contacted'] = True
+
+                # Mark title as contacted to prevent duplicates across platforms
+                if self.id_watch:
+                    self.id_watch.mark_title_contacted(expose)
+            else:
+                logger.warning("⚠️  Failed to contact listing")
+                expose['_auto_contacted'] = False
 
         # Track if we should try headless fallback
         tried_non_headless = False
