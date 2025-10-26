@@ -41,16 +41,23 @@ class WgGesuchtContactBot:
     Handles session management and contact flow internally.
     """
     
-    def __init__(self, headless=True, template_index=0):
+    def __init__(self, headless=True, template_index=0, delay_min=0.5, delay_max=1.5):
         """
         Initialize bot with session management.
 
         Args:
             headless: Run browser in headless mode (default True)
             template_index: Which template to use (default 0 = first)
+            delay_min: Minimum delay between actions in seconds
+            delay_max: Maximum delay between actions in seconds
         """
         self.headless = headless
         self.template_index = template_index
+        self.delay_min = delay_min
+        self.delay_max = delay_max
+        self.driver = None
+        self.session_valid = False
+
         self.stealth_driver = StealthDriver(headless=headless)
         self.session_valid = False
 
@@ -64,6 +71,33 @@ class WgGesuchtContactBot:
         """Start the bot and initialize the driver."""
         self._init_driver()
         self._load_or_login()
+    
+    def _random_delay(self, min_sec=None, max_sec=None):
+        """Add random delay to mimic human behavior.
+
+        Args:
+            min_sec: Minimum delay in seconds (uses self.delay_min if not specified)
+            max_sec: Maximum delay in seconds (uses self.delay_max if not specified)
+        """
+        if min_sec is None:
+            min_sec = self.delay_min
+        if max_sec is None:
+            max_sec = self.delay_max
+        time.sleep(random.uniform(min_sec, max_sec))
+    
+    def _init_driver(self):
+        """Create Selenium driver."""
+        chrome_options = Options()
+        if self.headless:
+            chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        self.driver = webdriver.Chrome(options=chrome_options)
+        logger.info("Chrome driver initialized")
 
     def load_cookies(self):
         """Load saved session cookies. Returns True if session is valid."""

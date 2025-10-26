@@ -27,6 +27,13 @@ class WgGesuchtContactProcessor:
         self.enabled = config.get('wg_gesucht_auto_contact', False)
         self.template_index = config.get('wg_gesucht_template_index', 0)
         self.headless = config.get('wg_gesucht_headless', True)
+        self.delay_min = config.get('wg_gesucht_delay_min', 0.5)
+        self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
+
+        logger.info(f"WgGesuchtContactProcessor initialized (enabled={self.enabled})")
+    
+    def _init_bot(self):
+        """Initialize bot if needed. Returns True if bot is ready."""
         self.headless_original = self.headless  # Remember original setting
         self.current_headless = self.headless  # Track current mode
 
@@ -140,6 +147,14 @@ class WgGesuchtContactProcessor:
             headless_mode = self.current_headless
 
         try:
+            logger.info(f"Starting WG-Gesucht bot (delays={self.delay_min}-{self.delay_max}s)...")
+            self.bot = WgGesuchtContactBot(
+                headless=self.headless,
+                template_index=self.template_index,
+                delay_min=self.delay_min,
+                delay_max=self.delay_max
+            )
+
             logger.info(f"Starting WG-Gesucht contact bot (headless={headless_mode})...")
             self.bot = WgGesuchtContactBot(
                 headless=headless_mode,
