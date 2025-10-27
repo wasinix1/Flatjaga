@@ -327,14 +327,15 @@ class WillhabenContactProcessor:
                 try:
                     title = expose.get('title', 'Unknown')
                     retry_msg = f" (session {browser_session+1}, attempt {attempt+1})" if browser_session > 0 or attempt > 0 else ""
-                    logger.info(f"Auto-contacting: {title[:50]}...{retry_msg}")
+                    if retry_msg:
+                        logger.info(f"  Retry: {retry_msg}")
 
                     success = self.bot.send_contact_message(url)
 
                     elapsed = time.time() - start_time
                     if success:
                         self.total_contacted += 1
-                        logger.info(f"✓ Contacted successfully ({elapsed:.1f}s, total: {self.total_contacted})")
+                        logger.debug(f"Contact successful ({elapsed:.1f}s, total: {self.total_contacted})")
                         expose['_auto_contacted'] = True
 
                         # Mark title as contacted to prevent duplicates across platforms
