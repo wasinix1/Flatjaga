@@ -14,6 +14,7 @@ from flathunter.exceptions import ConfigException
 
 from flathunter.willhaben_contact_processor import WillhabenContactProcessor
 from flathunter.wg_gesucht_contact_processor import WgGesuchtContactProcessor
+from flathunter.derstandard_contact_processor import DerStandardContactProcessor
 from flathunter.notifiers import SenderTelegram
 from flathunter.session_manager import SessionManager
 
@@ -48,6 +49,11 @@ class Hunter:
 
         # Initialize wg-gesucht processor with telegram notifier, id_watch, and session manager
         self.wg_gesucht_processor = WgGesuchtContactProcessor(
+            config, self.telegram_notifier, id_watch, self.session_manager
+        )
+
+        # Initialize derStandard processor with telegram notifier, id_watch, and session manager
+        self.derstandard_processor = DerStandardContactProcessor(
             config, self.telegram_notifier, id_watch, self.session_manager
         )
 
@@ -139,7 +145,8 @@ class Hunter:
         crawler = expose.get('crawler', '').lower()
         url = expose.get('url', '')
         return ('willhaben' in crawler or 'willhaben.at' in url or
-                'wg-gesucht' in crawler or 'wg-gesucht.de' in url or 'wggesucht' in crawler)
+                'wg-gesucht' in crawler or 'wg-gesucht.de' in url or 'wggesucht' in crawler or
+                'derstandard' in crawler or 'derstandard.at' in url)
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a listing is successfully contacted"""
@@ -264,6 +271,12 @@ class Hunter:
                 expose = self.wg_gesucht_processor.process_expose(expose)
             except Exception as e:
                 logger.error(f"CRITICAL: WG-Gesucht contact processor crashed (continuing): {e}", exc_info=True)
+                expose['_auto_contacted'] = False
+
+            try:
+                expose = self.derstandard_processor.process_expose(expose)
+            except Exception as e:
+                logger.error(f"CRITICAL: derStandard contact processor crashed (continuing): {e}", exc_info=True)
                 expose['_auto_contacted'] = False
 
             # Log contact result if auto-contact was attempted

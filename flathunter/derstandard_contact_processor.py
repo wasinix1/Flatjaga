@@ -28,6 +28,7 @@ class DerStandardContactProcessor:
         self.session_manager = session_manager or SessionManager()
 
         # Get config options
+        self.enabled = config.get('derstandard_auto_contact', False)
         self.headless = config.get('derstandard_headless', True)
         self.delay_min = config.get('derstandard_delay_min', 0.5)
         self.delay_max = config.get('derstandard_delay_max', 2.0)
@@ -40,7 +41,7 @@ class DerStandardContactProcessor:
         # Setup failure log file
         self.failure_log_file = Path.home() / '.derstandard_contact_failures.jsonl'
 
-        logger.info(f"derStandard auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled)")
+        logger.info(f"derStandard auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, title cross-ref enabled)")
 
     def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
         """Log contact failure to file with timestamp and details"""
@@ -192,6 +193,12 @@ class DerStandardContactProcessor:
 
         if 'derstandard' not in crawler and 'derstandard.at' not in url:
             return expose  # Not derStandard, pass through
+
+        # Check if auto-contact is enabled
+        if not self.enabled:
+            logger.debug("derStandard auto-contact is disabled - skipping")
+            expose['_auto_contacted'] = False
+            return expose
 
         # Check if title was already contacted (cross-platform check)
         if self.id_watch:
