@@ -81,51 +81,93 @@ class WillhabenContactBot:
 
         time.sleep(random.uniform(min_sec, max_sec))
     
-    def accept_cookies(self):
-        """Accept cookie banner if it appears - optimized for speed"""
+    def _try_click_element(self, element, description="element"):
+        """Try multiple strategies to click an element.
+
+        Args:
+            element: Selenium WebElement to click
+            description: Description for logging
+
+        Returns:
+            True if click succeeded, False otherwise
+        """
+        strategies = [
+            ("normal click", lambda e: e.click()),
+            ("JavaScript click", lambda e: self.driver.execute_script("arguments[0].click();", e)),
+            ("scroll and click", lambda e: (
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", e),
+                time.sleep(0.1),
+                e.click()
+            )),
+        ]
+
+        for strategy_name, strategy_func in strategies:
+            try:
+                strategy_func(element)
+                logger.debug(f"✓ Clicked {description} using {strategy_name}")
+                return True
+            except Exception as e:
+                logger.debug(f"  {strategy_name} failed for {description}: {e}")
+                continue
+
+        logger.warning(f"✗ All click strategies failed for {description}")
+        return False
+
+    def _handle_popups(self):
+        """Handle any popups that might appear (cookies, privacy, security).
+        Can be called at any time - checks for multiple popup types.
+
+        Returns:
+            True if any popup was handled, False otherwise
+        """
+        handled = False
+
+        # Try to accept cookies
         try:
-            # No initial delay - check immediately for performance
-            # If banner hasn't loaded yet, we'll catch it next time
-
-            # Find all buttons on page
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
-
-            # Look for cookie accept button by text
             for button in buttons:
                 try:
+                    if not button.is_displayed():
+                        continue
                     button_text = button.text.lower()
                     if any(word in button_text for word in ['akzeptieren', 'accept', 'zustimmen', 'agree', 'alle']):
-                        button.click()
-                        print("✓ Cookies accepted")
-                        return True
+                        if self._try_click_element(button, "cookie button"):
+                            logger.info("✓ Accepted cookies")
+                            handled = True
+                            self._random_delay(0.2, 0.4)
+                            break
                 except:
                     continue
+        except:
+            pass
 
-            print("  (No cookie banner found)")
-            return False
-        except Exception as e:
-            print("  (Cookie acceptance skipped)")
-            return False
-    
-    def accept_privacy_popup(self):
-        """Accept the 'Zu deiner Sicherheit' privacy popup if it appears - optimized"""
+        # Try to accept privacy popup
         try:
-            # Look for "Ja, ich stimme zu" button
             buttons = self.driver.find_elements(By.TAG_NAME, "button")
             for button in buttons:
                 try:
+                    if not button.is_displayed():
+                        continue
                     if "ja, ich stimme zu" in button.text.lower():
-                        button.click()
-                        print("✓ Privacy popup accepted")
-                        return True
+                        if self._try_click_element(button, "privacy button"):
+                            logger.info("✓ Accepted privacy popup")
+                            handled = True
+                            self._random_delay(0.2, 0.4)
+                            break
                 except:
                     continue
+        except:
+            pass
 
-            print("  (No privacy popup)")
-            return False
-        except Exception as e:
-            print("  (Privacy popup skipped)")
-            return False
+        return handled
+
+    def accept_cookies(self):
+        """Accept cookie banner if it appears - uses new popup handler"""
+        return self._handle_popups()
+
+    def accept_privacy_popup(self):
+        """Accept privacy popup if it appears - uses new popup handler"""
+        return self._handle_popups()
     
     def start(self):
         """Start the Chrome WebDriver"""
@@ -210,161 +252,174 @@ class WillhabenContactBot:
     
     def send_contact_message(self, listing_url):
         """
-        Send a contact message to a specific listing
-        
+        Send a contact message to a specific listing with adaptive form detection.
+
         Args:
             listing_url: Full URL to the willhaben listing
-            
+
         Returns:
             True if message sent successfully, False otherwise
         """
         # Check if already contacted
         if self.is_already_contacted(listing_url):
-            print(f"⊘ Already contacted: {listing_url}")
+            logger.info(f"Already contacted: {listing_url}")
             return False
-        
-        listing_id = listing_url.rstrip('/').split('/')[-1]
-        
-        try:
-            print(f"\n→ Opening listing: {listing_url}")
-            self.driver.get(listing_url)
 
-            # Quick check if we got redirected to login page (basically free)
+        listing_id = listing_url.rstrip('/').split('/')[-1]
+
+        try:
+            logger.info(f"Opening listing: {listing_url}")
+            self.driver.get(listing_url)
+            self._random_delay(0.5, 1.0)
+
+            # Quick check if we got redirected to login page
             if 'sso.willhaben.at' in self.driver.current_url:
-                print("✗ Session expired - redirected to login")
+                logger.error("Session expired - redirected to login")
                 raise SessionExpiredException("Session expired")
 
-            # Wait for the contact form to appear
-            wait = WebDriverWait(self.driver, 10)
+            # Handle popups that might appear on page load
+            self._handle_popups()
+            self._random_delay(0.3, 0.6)
 
-            # Find the contact form - could be either email form or messaging form
-            print("→ Looking for contact form...")
+            # Adaptive form detection - try multiple approaches
             form_found = False
             form_type = None
+            submit_button = None
+            max_attempts = 15
 
-            # Try to find email form (company listings)
-            try:
-                wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, 'form[data-testid="ad-contact-form-email"]'))
-                )
-                form_type = "email"
-                form_found = True
-                print("  (Found company listing form)")
-            except:
-                pass
+            logger.info("Looking for contact form...")
+            for attempt in range(max_attempts):
+                self._random_delay(0.3, 0.5)
 
-            # Try to find messaging form (private listings)
+                # Check for popups at any time
+                self._handle_popups()
+
+                # Try to find email form (company listings)
+                if not form_found:
+                    try:
+                        email_form = self.driver.find_element(By.CSS_SELECTOR, 'form[data-testid="ad-contact-form-email"]')
+                        if email_form.is_displayed():
+                            form_type = "email"
+                            form_found = True
+                            logger.info("Found company listing form (email)")
+                            continue
+                    except:
+                        pass
+
+                # Try to find messaging form (private listings)
+                if not form_found:
+                    try:
+                        messaging_form = self.driver.find_element(By.CSS_SELECTOR, 'form[data-testid="ad-contact-form-messaging"]')
+                        if messaging_form.is_displayed():
+                            form_type = "messaging"
+                            form_found = True
+                            logger.info("Found private listing form (messaging)")
+                            continue
+                    except:
+                        pass
+
+                # If form found, process it
+                if form_found and form_type == "email":
+                    # Email form: Check boxes
+                    try:
+                        viewing_checkbox = self.driver.find_element(By.ID, "contactSuggestions-6")
+                        if viewing_checkbox and not viewing_checkbox.is_selected():
+                            self._try_click_element(viewing_checkbox, "viewing checkbox")
+                            logger.info("Checked viewing option")
+                            self._random_delay(0.1, 0.2)
+                    except:
+                        pass
+
+                    try:
+                        mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
+                        if mietprofil_checkbox.is_enabled() and not mietprofil_checkbox.is_selected():
+                            self._try_click_element(mietprofil_checkbox, "mietprofil checkbox")
+                            logger.info("Checked mietprofil option")
+                            self._random_delay(0.1, 0.2)
+                    except:
+                        pass
+
+                    # Find submit button
+                    try:
+                        submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-mail"]')
+                        if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
+                            logger.info("Found email submit button")
+                            break
+                    except:
+                        pass
+
+                elif form_found and form_type == "messaging":
+                    # Messaging form: Fill textarea if needed
+                    try:
+                        message_textarea = self.driver.find_element(By.ID, "mailContent")
+                        if message_textarea and not message_textarea.get_attribute("value"):
+                            message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                            message_textarea.send_keys(message_text)
+                            logger.info("Filled message field")
+                            self._random_delay(0.1, 0.3)
+                    except:
+                        pass
+
+                    # Find submit button
+                    try:
+                        submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]')
+                        if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
+                            logger.info("Found message submit button")
+                            break
+                    except:
+                        pass
+
             if not form_found:
-                try:
-                    wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, 'form[data-testid="ad-contact-form-messaging"]'))
-                    )
-                    form_type = "messaging"
-                    form_found = True
-                    print("  (Found private listing form)")
-                except Exception as e:
-                    print(f"  (Could not find messaging form: {str(e)})")
-                    raise Exception("Could not find contact form")
-            
-            # If it's an email form (company listing), check the boxes
-            if form_type == "email":
-                # Click the "Ist eine Besichtigung möglich?" checkbox
-                # The checkbox input is hidden, so we use JavaScript to click it
-                print("→ Checking 'Ist eine Besichtigung möglich?' box...")
-                viewing_checkbox = wait.until(
-                    EC.presence_of_element_located((By.ID, "contactSuggestions-6"))
-                )
-                self.driver.execute_script("arguments[0].click();", viewing_checkbox)
-                self._random_delay(0.1, 0.2)
+                logger.error("Could not find contact form after multiple attempts")
+                return False
 
-                # Check if Mietprofil checkbox exists and is enabled
-                try:
-                    mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
-                    if mietprofil_checkbox.is_enabled():
-                        print("→ Checking 'Mietprofil teilen' box...")
-                        self.driver.execute_script("arguments[0].click();", mietprofil_checkbox)
-                        self._random_delay(0.1, 0.2)
-                except NoSuchElementException:
-                    print("  (Mietprofil checkbox not available)")
+            if not submit_button:
+                logger.error("Could not find submit button after multiple attempts")
+                return False
 
-                # Find and click the email submit button
-                print("→ Clicking email submit button...")
-                submit_button = wait.until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="ad-request-send-mail"]'))
-                )
-            else:
-                # For messaging form (private listing), need to fill the message textarea
-                print("→ Looking for message textarea...")
+            # Submit the form with multiple click strategies
+            logger.info(f"Submitting form (type: {form_type})")
+            self._random_delay(0.2, 0.4)
+
+            if not self._try_click_element(submit_button, "submit button"):
+                logger.error("Failed to click submit button")
+                return False
+
+            logger.info("Form submitted")
+            self._random_delay(0.5, 1.0)
+
+            # Handle any popups after submission
+            self._handle_popups()
+            self._random_delay(0.3, 0.6)
+
+            # Check for success message
+            logger.info("Waiting for confirmation...")
+            success_found = False
+            for attempt in range(10):
+                self._random_delay(0.3, 0.5)
                 try:
-                    message_textarea = self.driver.find_element(By.ID, "mailContent")
-                    if not message_textarea.get_attribute("value"):
-                        print("→ Filling message field...")
-                        # Add a simple message (you can customize this)
-                        message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
-                        message_textarea.send_keys(message_text)
-                        self._random_delay(0.1, 0.3)
+                    success_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'wurde erfolgreich')]")
+                    if success_elements and any(el.is_displayed() for el in success_elements):
+                        success_found = True
+                        break
                 except:
                     pass
-                
-                # Find the submit button
-                print("→ Looking for message submit button...")
-                try:
-                    submit_button = wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]'))
-                    )
-                    print(f"  (Found button with text: '{submit_button.text}')")
-                except Exception as e:
-                    print(f"  ✗ Could not find submit button: {str(e)}")
-                    # Try to find ANY submit button as fallback
-                    print("  → Trying to find any submit button...")
-                    submit_buttons = self.driver.find_elements(By.CSS_SELECTOR, 'button[type="submit"]')
-                    print(f"  → Found {len(submit_buttons)} submit buttons")
-                    for btn in submit_buttons:
-                        print(f"    - Button text: '{btn.text}', testid: {btn.get_attribute('data-testid')}")
-                    raise
-            
-            # Click whichever button we found
-            print(f"→ About to submit form via button: '{submit_button.text}'")
-            print(f"  (Button testid: {submit_button.get_attribute('data-testid')})")
 
-            self._random_delay(0.2, 0.4)  # Small delay before submit
-
-            # Try clicking the button normally first (not JavaScript) to trigger proper form validation
-            try:
-                submit_button.click()
-                print("✓ Button clicked (normal click)!")
-            except:
-                # If normal click fails, fall back to JavaScript
-                print("  (Normal click failed, trying JavaScript...)")
-                self.driver.execute_script("arguments[0].click();", submit_button)
-                print("✓ Button clicked (JavaScript)!")
-
-            self._random_delay(0.5, 0.8)  # Wait for form submission
-
-            # Privacy popup appears after clicking submit - accept it
-            print("→ Accepting privacy popup...")
-            self.accept_privacy_popup()
-            self._random_delay(0.1, 0.3)
-            
-            # Check for success message
-            print("→ Waiting for confirmation...")
-            # Could be either "E-Mail wurde erfolgreich" or "Nachricht wurde erfolgreich"
-            success_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'wurde erfolgreich')]")
-            
-            if success_elements:
-                # Mark as contacted
+            if success_found:
                 self._save_contacted_listing(listing_id)
-                print(f"✓ Message sent successfully to {listing_id}!")
+                logger.info(f"✓ Message sent successfully to {listing_id}")
                 return True
             else:
-                print(f"✗ Could not confirm message was sent")
+                logger.warning("Could not confirm message was sent")
                 return False
-            
+
+        except SessionExpiredException:
+            raise
         except TimeoutException:
-            print(f"✗ Timeout waiting for contact form on {listing_url}")
+            logger.error(f"Timeout waiting for contact form on {listing_url}")
             return False
         except Exception as e:
-            print(f"✗ Error sending message: {str(e)}")
+            logger.error(f"Error sending message: {str(e)}")
             return False
     
     def test_single_listing(self, listing_url):
