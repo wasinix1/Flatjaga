@@ -274,10 +274,10 @@ class WgGesucht(Crawler):
             sess = requests.session()
             # First page load to set filters; response is discarded
             logger.debug("Loading WG-Gesucht page (first request to set filters): %s", url)
-            sess.get(url, headers=self.HEADERS)
+            sess.get(url, headers=self.HEADERS, timeout=30)
             # Second page load
             logger.debug("Loading WG-Gesucht page (second request): %s", url)
-            resp = sess.get(url, headers=self.HEADERS)
+            resp = sess.get(url, headers=self.HEADERS, timeout=30)
 
             if resp.status_code not in (200, 405):
                 logger.error("Received HTTP %d from WG-Gesucht for URL %s: %s",
