@@ -65,9 +65,12 @@ def setup_wggesucht():
             cookie_file.unlink()
             print("Old session deleted. Proceeding with new login...\n")
 
-        # Bot will automatically prompt for manual login if no session exists
         # Initialize in non-headless mode for manual login
         bot = WgGesuchtContactBot(headless=False)
+        bot.start()
+
+        # Explicitly call manual login (used only in setup, not during automated runs)
+        bot._login_manual()
 
         print("\n✓ WG-Gesucht session saved!")
 
