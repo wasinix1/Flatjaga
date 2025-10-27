@@ -129,9 +129,15 @@ class WgGesuchtContactBot:
         """Load saved session cookies. Returns True if session is valid."""
         if os.path.exists(COOKIE_FILE):
             logger.info("Found saved session, loading cookies...")
-            return self._load_cookies()
+            if self._load_cookies():
+                self.session_valid = True
+                return True
+            else:
+                self.session_valid = False
+                return False
         else:
             logger.warning("No saved session found")
+            self.session_valid = False
             return False
     
     def _load_or_login(self):

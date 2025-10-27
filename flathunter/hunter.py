@@ -15,6 +15,7 @@ from flathunter.exceptions import ConfigException
 from flathunter.willhaben_contact_processor import WillhabenContactProcessor
 from flathunter.wg_gesucht_contact_processor import WgGesuchtContactProcessor
 from flathunter.notifiers import SenderTelegram
+from flathunter.session_manager import SessionManager
 
 class Hunter:
     """Basic methods for crawling and processing / filtering exposes"""
@@ -37,11 +38,18 @@ class Hunter:
         if 'telegram' in self.config.notifiers():
             self.telegram_notifier = SenderTelegram(self.config)
 
-        # Initialize willhaben processor with telegram notifier and id_watch
-        self.willhaben_processor = WillhabenContactProcessor(config, self.telegram_notifier, id_watch)
+        # Initialize shared session manager for both processors
+        self.session_manager = SessionManager()
 
-        # Initialize wg-gesucht processor with telegram notifier and id_watch
-        self.wg_gesucht_processor = WgGesuchtContactProcessor(config, self.telegram_notifier, id_watch)
+        # Initialize willhaben processor with telegram notifier, id_watch, and session manager
+        self.willhaben_processor = WillhabenContactProcessor(
+            config, self.telegram_notifier, id_watch, self.session_manager
+        )
+
+        # Initialize wg-gesucht processor with telegram notifier, id_watch, and session manager
+        self.wg_gesucht_processor = WgGesuchtContactProcessor(
+            config, self.telegram_notifier, id_watch, self.session_manager
+        )
 
 
     def get_crawler_delay(self, crawler_name: str) -> int:
@@ -205,6 +213,11 @@ class Hunter:
         """Crawl, process and filter exposes"""
         # Reset crawler status for this hunt cycle
         self.crawler_status = {}
+
+        # Keep sessions active to prevent expiry
+        logger.debug("Checking session validity...")
+        self.willhaben_processor.keep_session_active()
+        self.wg_gesucht_processor.keep_session_active()
 
         filter_set = Filter.builder() \
                            .read_config(self.config) \

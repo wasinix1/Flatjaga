@@ -5,6 +5,7 @@ Detects browser crashes and restarts automatically
 
 from flathunter.logging import logger
 from flathunter.willhaben_contact_bot import WillhabenContactBot, SessionExpiredException
+from flathunter.session_manager import SessionManager
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
 import json
@@ -15,7 +16,7 @@ from datetime import datetime
 class WillhabenContactProcessor:
     """Processor that auto-contacts willhaben listings - with crash recovery and headless fallback"""
 
-    def __init__(self, config, telegram_notifier=None, id_watch=None):
+    def __init__(self, config, telegram_notifier=None, id_watch=None, session_manager=None):
         self.config = config
         self.bot = None
         self.bot_ready = False
@@ -23,6 +24,7 @@ class WillhabenContactProcessor:
         self.total_errors = 0
         self.telegram_notifier = telegram_notifier
         self.id_watch = id_watch
+        self.session_manager = session_manager or SessionManager()
 
         # Get config options
         self.headless = config.get('willhaben_headless', True)
@@ -36,7 +38,7 @@ class WillhabenContactProcessor:
         # Setup failure log file
         self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
 
-        logger.info(f"Willhaben auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled)")
+        logger.info(f"Willhaben auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled, session tracking enabled)")
 
     def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
         """Log contact failure to file with timestamp and details"""
@@ -169,13 +171,107 @@ class WillhabenContactProcessor:
                 return False
 
             self.bot_ready = True
+
+            # Update session timestamp on successful initialization
+            self.session_manager.update_timestamp('willhaben', valid=True)
+
             logger.info(f"✓ Willhaben bot ready (headless={headless_mode}, stats: {self.total_contacted} contacted, {self.total_errors} errors)")
             return True
 
         except Exception as e:
             logger.error(f"Failed to start willhaben bot: {e}")
             return False
-    
+
+    def keep_session_active(self):
+        """
+        Check and validate session to prevent expiry.
+        Opens browser if 2+ hours have passed since last validation.
+        Uses headless=false for stability during validation.
+        """
+        # Check if processor is disabled
+        if not self.session_manager.is_enabled('willhaben'):
+            logger.warning("Willhaben processor is disabled - skipping session check")
+            return False
+
+        # Check if validation is needed
+        if not self.session_manager.needs_validation('willhaben'):
+            return True
+
+        logger.info("Willhaben session validation needed (2+ hours elapsed)")
+
+        # Start browser with headless=false for stability
+        temp_bot = None
+        try:
+            logger.info("Opening browser for session validation (headless=false)...")
+            temp_bot = WillhabenContactBot(
+                headless=False,
+                delay_min=self.delay_min,
+                delay_max=self.delay_max
+            )
+            temp_bot.start()
+
+            # Load cookies and validate
+            if not temp_bot.load_cookies():
+                logger.error("No willhaben session found during validation")
+                self.session_manager.disable('willhaben', "No session cookies found")
+
+                # Send telegram notification
+                if self.telegram_notifier:
+                    self.telegram_notifier.notify(
+                        "⚠️ WILLHABEN SESSION EXPIRED ⚠️\n\n"
+                        "Session cookies not found.\n"
+                        "Please run 'python setup_sessions.py' to re-login.\n\n"
+                        "Auto-contact for Willhaben is now DISABLED until restart."
+                    )
+                return False
+
+            # Navigate to main page to validate session
+            temp_bot.driver.get('https://www.willhaben.at')
+            time.sleep(1)
+
+            # Check if redirected to login (session expired)
+            if 'sso.willhaben.at' in temp_bot.driver.current_url:
+                logger.error("Session validation failed - redirected to login")
+                self.session_manager.disable('willhaben', "Session expired - login required")
+
+                # Send telegram notification
+                if self.telegram_notifier:
+                    self.telegram_notifier.notify(
+                        "⚠️ WILLHABEN SESSION EXPIRED ⚠️\n\n"
+                        "Session validation failed - redirected to login.\n"
+                        "Please run 'python setup_sessions.py' to re-login.\n\n"
+                        "Auto-contact for Willhaben is now DISABLED until restart."
+                    )
+                return False
+
+            # Session is valid
+            logger.info("✓ Willhaben session validated successfully")
+            self.session_manager.update_timestamp('willhaben', valid=True)
+            return True
+
+        except Exception as e:
+            logger.error(f"Session validation failed: {e}")
+            self.session_manager.disable('willhaben', f"Validation error: {str(e)[:100]}")
+
+            # Send telegram notification
+            if self.telegram_notifier:
+                self.telegram_notifier.notify(
+                    f"⚠️ WILLHABEN SESSION VALIDATION FAILED ⚠️\n\n"
+                    f"Error: {str(e)[:200]}\n\n"
+                    f"Please run 'python setup_sessions.py' to re-login.\n\n"
+                    f"Auto-contact for Willhaben is now DISABLED until restart."
+                )
+            return False
+
+        finally:
+            # Always close browser after validation
+            if temp_bot:
+                try:
+                    temp_bot.close()
+                    logger.info("Closed validation browser")
+                except Exception as e:
+                    logger.warning(f"Error closing validation browser: {e}")
+
     def process_expose(self, expose):
         """
         Process a single expose - contact if willhaben
@@ -189,6 +285,12 @@ class WillhabenContactProcessor:
 
         if 'willhaben' not in crawler and 'willhaben.at' not in url:
             return expose  # Not willhaben, pass through
+
+        # Check if processor is disabled
+        if not self.session_manager.is_enabled('willhaben'):
+            logger.warning("Willhaben processor is disabled - skipping listing")
+            expose['_auto_contacted'] = False
+            return expose
 
         # Check if title was already contacted (cross-platform check)
         if self.id_watch:
@@ -261,6 +363,18 @@ class WillhabenContactProcessor:
 
                     # Log failure with special category
                     self._log_failure_to_file(expose, str(e), "session_expired")
+
+                    # Disable processor until restart
+                    self.session_manager.disable('willhaben', "Session expired during contact")
+
+                    # Send telegram notification
+                    if self.telegram_notifier:
+                        self.telegram_notifier.notify(
+                            "⚠️ WILLHABEN SESSION EXPIRED ⚠️\n\n"
+                            "Session expired while contacting listing.\n"
+                            "Please run 'python setup_sessions.py' to re-login.\n\n"
+                            "Auto-contact for Willhaben is now DISABLED until restart."
+                        )
 
                     # Stop processing - session is expired, mark bot as not ready
                     self.bot_ready = False
@@ -355,7 +469,18 @@ class WillhabenContactProcessor:
                     elapsed = time.time() - start_time
                     logger.error(f"Session expired in non-headless mode ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
-                    # Don't send notification for session expiration
+
+                    # Disable processor until restart
+                    self.session_manager.disable('willhaben', "Session expired during non-headless retry")
+
+                    # Send telegram notification
+                    if self.telegram_notifier:
+                        self.telegram_notifier.notify(
+                            "⚠️ WILLHABEN SESSION EXPIRED ⚠️\n\n"
+                            "Session expired during non-headless retry.\n"
+                            "Please run 'python setup_sessions.py' to re-login.\n\n"
+                            "Auto-contact for Willhaben is now DISABLED until restart."
+                        )
 
                 except Exception as e:
                     elapsed = time.time() - start_time

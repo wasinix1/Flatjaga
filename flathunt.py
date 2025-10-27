@@ -87,7 +87,8 @@ def check_saved_sessions():
                 logger.error(f"Failed to clear {service} session: {e}")
         print("\nYou can now login with a different account.")
         print("Run 'python setup_sessions.py' to login and setup new sessions.\n")
-        return
+        import sys
+        sys.exit(0)
     else:
         print("Using saved session(s)...\n")
 
@@ -102,6 +103,33 @@ def launch_flat_hunt(config, heartbeat: Heartbeat):
     wait_during_period(time_from, time_till)
 
     hunter = Hunter(config, id_watch)
+
+    # Check for disabled processors from previous run
+    disabled = hunter.session_manager.get_disabled_processors()
+    if disabled:
+        print("\n" + "="*60)
+        print("⚠️  SESSION EXPIRY WARNING")
+        print("="*60)
+        for proc in disabled:
+            print(f"  • {proc['name'].upper()}: Session expired")
+            print(f"    Reason: {proc['reason']}")
+            print(f"    Disabled at: {proc['disabled_at']}")
+        print("\nRun 'python setup_sessions.py' to re-login.")
+        print("Sessions will be validated on first use.")
+        print("="*60 + "\n")
+
+        # Send telegram notification if available
+        if hunter.telegram_notifier:
+            message = "⚠️ FLATHUNT RESTARTED - SESSION EXPIRY DETECTED ⚠️\n\n"
+            for proc in disabled:
+                message += f"• {proc['name'].upper()}: {proc['reason']}\n"
+            message += "\nRun 'python setup_sessions.py' to re-login.\n"
+            message += "Sessions will be validated on first use."
+            hunter.telegram_notifier.notify(message)
+
+    # Reset all processors to enabled (will be validated on first use)
+    hunter.session_manager.reset_all()
+
     hunter.hunt_flats()
     counter = 0
 
