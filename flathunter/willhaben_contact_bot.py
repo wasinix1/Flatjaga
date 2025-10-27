@@ -364,23 +364,45 @@ class WillhabenContactBot:
                 # If form found, process it
                 if form_found and form_type == "email":
                     # Email form: Check boxes
+                    # Viewing checkbox (optional)
                     try:
                         viewing_checkbox = self.driver.find_element(By.ID, "contactSuggestions-6")
                         if viewing_checkbox and not viewing_checkbox.is_selected():
                             self._try_click_element(viewing_checkbox, "viewing checkbox")
-                            logger.info("Checked viewing option")
+                            logger.info("✓ Checked viewing option")
                             self._random_delay(0.1, 0.2)
-                    except:
-                        pass
+                        else:
+                            logger.debug("Viewing checkbox already selected")
+                    except Exception as e:
+                        logger.debug(f"Viewing checkbox not found or not available: {e}")
 
+                    # Mietprofil checkbox (CRITICAL - must always be checked)
                     try:
                         mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
-                        if mietprofil_checkbox.is_enabled() and not mietprofil_checkbox.is_selected():
-                            self._try_click_element(mietprofil_checkbox, "mietprofil checkbox")
-                            logger.info("Checked mietprofil option")
-                            self._random_delay(0.1, 0.2)
-                    except:
-                        pass
+
+                        # Check current state
+                        is_enabled = mietprofil_checkbox.is_enabled()
+                        is_selected = mietprofil_checkbox.is_selected()
+
+                        if not is_enabled:
+                            logger.warning("⚠️ Mietprofil checkbox is DISABLED - cannot check it")
+                        elif is_selected:
+                            logger.info("✓ Mietprofil checkbox already checked")
+                        else:
+                            # Need to check it
+                            if self._try_click_element(mietprofil_checkbox, "mietprofil checkbox"):
+                                # Verify it was actually checked
+                                self._random_delay(0.1, 0.2)
+                                if mietprofil_checkbox.is_selected():
+                                    logger.info("✓ Mietprofil checkbox checked successfully")
+                                else:
+                                    logger.error("❌ CRITICAL: Mietprofil checkbox click failed - checkbox NOT checked!")
+                            else:
+                                logger.error("❌ CRITICAL: Failed to click Mietprofil checkbox")
+
+                        self._random_delay(0.1, 0.2)
+                    except Exception as e:
+                        logger.error(f"❌ CRITICAL: Could not find/check Mietprofil checkbox: {e}")
 
                     # Find submit button
                     try:
