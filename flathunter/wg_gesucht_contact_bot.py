@@ -17,7 +17,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
-from .stealth_driver import StealthDriver
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +57,6 @@ class WgGesuchtContactBot:
         self.driver = None
         self.session_valid = False
 
-        self.stealth_driver = StealthDriver(headless=headless)
-        self.session_valid = False
-
-        logger.info("Initializing WG-Gesucht bot with stealth...")
-        self.stealth_driver.start()
-        self.driver = self.stealth_driver.driver
-        
         logger.info("Initializing WG-Gesucht bot...")
 
     def start(self):
@@ -84,11 +76,7 @@ class WgGesuchtContactBot:
         if max_sec is None:
             max_sec = self.delay_max
 
-        # Delegate to stealth driver's smart_delay for better human-like behavior
-        if hasattr(self, 'stealth_driver') and self.stealth_driver:
-            self.stealth_driver.smart_delay(min_sec, max_sec)
-        else:
-            time.sleep(random.uniform(min_sec, max_sec))
+        time.sleep(random.uniform(min_sec, max_sec))
 
     def _init_driver(self):
         """Create Selenium driver."""
@@ -391,9 +379,7 @@ class WgGesuchtContactBot:
     
     def close(self):
         """Close browser."""
-        if hasattr(self, 'stealth_driver') and self.stealth_driver:
-            self.stealth_driver.quit()
-        elif self.driver:
+        if self.driver:
             self.driver.quit()
             logger.info("Browser closed")
 
