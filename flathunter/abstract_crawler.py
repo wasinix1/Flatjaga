@@ -1,6 +1,8 @@
 """Interface for webcrawlers. Crawler implementations should subclass this"""
 from abc import ABC
 import re
+import time
+import random
 from time import sleep
 from typing import Optional, Any
 import json
@@ -62,8 +64,22 @@ class Crawler(ABC):
             url: str,
             driver: Optional[Any] = None,
             checkbox: bool = False,
-            afterlogin_string: Optional[str] = None) -> BeautifulSoup:
-        """Creates a Soup object from the HTML at the provided URL"""
+            afterlogin_string: Optional[str] = None,
+            retry_count: int = 0) -> BeautifulSoup:
+        """
+        Creates a Soup object from the HTML at the provided URL
+
+        Implements exponential backoff with jitter for retries to avoid rate limiting.
+
+        Args:
+            url: URL to fetch
+            driver: Optional Selenium driver
+            checkbox: Captcha checkbox flag
+            afterlogin_string: String to wait for after login
+            retry_count: Current retry attempt (for internal use)
+        """
+        max_retries = 3
+        base_delay = 5  # seconds
 
         if self.config.use_proxy():
             return self.get_soup_with_proxy(url)
@@ -78,15 +94,42 @@ class Crawler(ABC):
                     driver, checkbox, afterlogin_string or "")
             return BeautifulSoup(driver.page_source, 'lxml')
 
-        resp = requests.get(url, headers=self.HEADERS, timeout=30)
-        if resp.status_code not in (200, 405):
-            user_agent = 'Unknown'
-            if 'User-Agent' in self.HEADERS:
-                user_agent = self.HEADERS['User-Agent']
-            logger.error("Got response (%i): %s\n%s",
-                         resp.status_code, resp.content, user_agent)
+        try:
+            resp = requests.get(url, headers=self.HEADERS, timeout=30)
 
-        return BeautifulSoup(resp.content, 'lxml')
+            # Check for rate limiting (HTTP 429) or server errors (5xx)
+            if resp.status_code == 429:
+                logger.warning("Rate limit hit (HTTP 429) for %s", url)
+                raise requests.exceptions.RequestException("Rate limited")
+            elif resp.status_code >= 500:
+                logger.warning("Server error (HTTP %d) for %s", resp.status_code, url)
+                raise requests.exceptions.RequestException("Server error")
+            elif resp.status_code not in (200, 405):
+                user_agent = 'Unknown'
+                if 'User-Agent' in self.HEADERS:
+                    user_agent = self.HEADERS['User-Agent']
+                logger.error("Got response (%i): %s\n%s",
+                             resp.status_code, resp.content, user_agent)
+
+            return BeautifulSoup(resp.content, 'lxml')
+
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as exc:
+            if retry_count >= max_retries:
+                logger.error(
+                    f"Page load failed after {max_retries} retries - likely rate limited or down: {url}"
+                )
+                # Return empty soup after exhausting retries
+                return BeautifulSoup("", 'lxml')
+
+            # Exponential backoff with jitter to avoid thundering herd
+            delay = base_delay * (2 ** retry_count) + random.uniform(0, 3)
+            logger.warning(
+                f"Request failed ({type(exc).__name__}), "
+                f"retrying in {delay:.1f}s (attempt {retry_count + 1}/{max_retries}) for {url}"
+            )
+            time.sleep(delay)
+
+            return self.get_soup_from_url(url, driver, checkbox, afterlogin_string, retry_count + 1)
 
     def get_soup_with_proxy(self, url) -> BeautifulSoup:
         """Will try proxies until it's possible to crawl and return a soup"""

@@ -1,5 +1,7 @@
 """Expose crawler for WgGesucht"""
 import re
+import time
+import random
 from typing import Optional, List, Dict, Any, Union
 
 import requests
@@ -262,14 +264,27 @@ class WgGesucht(Crawler):
             url: str,
             driver: Optional[Any] = None,
             checkbox: bool = False,
-            afterlogin_string: Optional[str] = None) -> BeautifulSoup:
+            afterlogin_string: Optional[str] = None,
+            retry_count: int = 0) -> BeautifulSoup:
         """
         Creates a Soup object from the HTML at the provided URL
 
         Overwrites the method inherited from abstract_crawler. This is
         necessary as we need to reload the page once for all filters to
         be applied correctly on wg-gesucht.
+
+        Implements exponential backoff with jitter for retries to avoid rate limiting.
+
+        Args:
+            url: URL to fetch
+            driver: Optional Selenium driver
+            checkbox: Captcha checkbox flag
+            afterlogin_string: String to wait for after login
+            retry_count: Current retry attempt (for internal use)
         """
+        max_retries = 3
+        base_delay = 5  # seconds
+
         try:
             sess = requests.session()
             # First page load to set filters; response is discarded
@@ -279,7 +294,14 @@ class WgGesucht(Crawler):
             logger.debug("Loading WG-Gesucht page (second request): %s", url)
             resp = sess.get(url, headers=self.HEADERS, timeout=30)
 
-            if resp.status_code not in (200, 405):
+            # Check for rate limiting (HTTP 429) or server errors (5xx)
+            if resp.status_code == 429:
+                logger.warning("WG-Gesucht rate limit hit (HTTP 429)")
+                raise requests.exceptions.RequestException("Rate limited")
+            elif resp.status_code >= 500:
+                logger.warning(f"WG-Gesucht server error (HTTP {resp.status_code})")
+                raise requests.exceptions.RequestException("Server error")
+            elif resp.status_code not in (200, 405):
                 logger.error("Received HTTP %d from WG-Gesucht for URL %s: %s",
                            resp.status_code, url, resp.content[:200])
             elif resp.status_code == 200:
@@ -301,9 +323,24 @@ class WgGesucht(Crawler):
                 return BeautifulSoup(driver.page_source, 'lxml')
             return BeautifulSoup(resp.content, 'lxml')
 
-        except requests.exceptions.RequestException as e:
-            logger.error("Network error loading WG-Gesucht page %s: %s", url, str(e))
-            return BeautifulSoup("", 'lxml')
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as exc:
+            if retry_count >= max_retries:
+                logger.error(
+                    f"WG-Gesucht page load failed after {max_retries} retries - likely rate limited or down: {url}"
+                )
+                # Return empty soup after exhausting retries
+                return BeautifulSoup("", 'lxml')
+
+            # Exponential backoff with jitter to avoid thundering herd
+            delay = base_delay * (2 ** retry_count) + random.uniform(0, 3)
+            logger.warning(
+                f"WG-Gesucht request failed ({type(exc).__name__}), "
+                f"retrying in {delay:.1f}s (attempt {retry_count + 1}/{max_retries})"
+            )
+            time.sleep(delay)
+
+            return self.get_soup_from_url(url, driver, checkbox, afterlogin_string, retry_count + 1)
+
         except Exception as e:
             logger.error("Unexpected error loading WG-Gesucht page %s: %s", url, str(e), exc_info=True)
             return BeautifulSoup("", 'lxml')
