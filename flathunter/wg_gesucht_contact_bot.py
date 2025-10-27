@@ -8,6 +8,7 @@ import time
 import json
 import os
 import random
+import signal
 from datetime import datetime
 from pathlib import Path
 from selenium import webdriver
@@ -417,10 +418,48 @@ class WgGesuchtContactBot:
             return False
     
     def close(self):
-        """Close browser."""
-        if self.driver:
-            self.driver.quit()
-            logger.info("Browser closed")
+        """Close the browser with timeout to prevent hanging"""
+        if not self.driver:
+            return
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Browser quit() operation timed out")
+
+        try:
+            # Set 10-second timeout for browser quit operation
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(10)
+
+            try:
+                self.driver.quit()
+                signal.alarm(0)  # Cancel alarm if quit succeeds
+                logger.info("Browser closed")
+            except TimeoutError:
+                signal.alarm(0)  # Cancel alarm
+                logger.error("Browser quit() timed out after 10s - forcing cleanup")
+
+                # Try to force kill the browser process
+                try:
+                    self.driver.service.process.kill()
+                    logger.warning("Killed browser process forcefully")
+                except Exception as e:
+                    logger.error(f"Could not force-kill browser: {e}")
+
+                logger.info("Browser closed (forced after timeout)")
+
+        except Exception as e:
+            signal.alarm(0)  # Always cancel alarm
+            logger.error(f"Error during browser close: {e}")
+
+            # Try force kill as last resort
+            try:
+                if hasattr(self, 'driver') and hasattr(self.driver, 'service'):
+                    self.driver.service.process.kill()
+                    logger.warning("Force-killed browser after error")
+            except:
+                pass
+        finally:
+            signal.alarm(0)  # Ensure alarm is always cancelled
 
 
 def contact_listing(driver, listing_url, template_index=0, timeout=10):
