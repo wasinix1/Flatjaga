@@ -58,18 +58,26 @@ class IdMaintainer:
 
     def is_processed(self, expose_id):
         """Returns true if an expose has already been processed"""
-        logger.debug('is_processed(%d)', expose_id)
-        cur = self.get_connection().cursor()
-        cur.execute('SELECT id FROM processed WHERE id = ?', (expose_id,))
-        row = cur.fetchone()
-        return row is not None
+        try:
+            logger.debug('is_processed(%d)', expose_id)
+            cur = self.get_connection().cursor()
+            cur.execute('SELECT id FROM processed WHERE id = ?', (expose_id,))
+            row = cur.fetchone()
+            return row is not None
+        except lite.Error as e:
+            logger.error(f"Database error checking if expose {expose_id} is processed: {e}")
+            # Conservative: assume not processed to avoid missing listings
+            return False
 
     def mark_processed(self, expose_id):
         """Mark an expose as processed in the database"""
-        logger.debug('mark_processed(%d)', expose_id)
-        cur = self.get_connection().cursor()
-        cur.execute('INSERT INTO processed VALUES(?)', (expose_id,))
-        self.get_connection().commit()
+        try:
+            logger.debug('mark_processed(%d)', expose_id)
+            cur = self.get_connection().cursor()
+            cur.execute('INSERT INTO processed VALUES(?)', (expose_id,))
+            self.get_connection().commit()
+        except lite.Error as e:
+            logger.error(f"Database error marking expose {expose_id} as processed: {e}")
 
     @staticmethod
     def normalize_title(title):
@@ -165,12 +173,15 @@ class IdMaintainer:
 
     def save_expose(self, expose):
         """Saves an expose to a database"""
-        cur = self.get_connection().cursor()
-        cur.execute('INSERT OR REPLACE INTO exposes(id, created, crawler, details) \
-                     VALUES (?, ?, ?, ?)',
-                    (int(expose['id']), datetime.datetime.now(),
-                     expose['crawler'], json.dumps(expose)))
-        self.get_connection().commit()
+        try:
+            cur = self.get_connection().cursor()
+            cur.execute('INSERT OR REPLACE INTO exposes(id, created, crawler, details) \
+                         VALUES (?, ?, ?, ?)',
+                        (int(expose['id']), datetime.datetime.now(),
+                         expose['crawler'], json.dumps(expose)))
+            self.get_connection().commit()
+        except (lite.Error, KeyError, ValueError) as e:
+            logger.error(f"Database error saving expose {expose.get('id', 'unknown')}: {e}")
 
     def get_exposes_since(self, min_datetime):
         """Loads all exposes since the specified date"""

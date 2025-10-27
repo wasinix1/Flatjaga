@@ -5,7 +5,7 @@ import time
 from itertools import chain
 import requests
 
-from flathunter.logging import logger
+from flathunter.logging import logger, Colors
 from flathunter.config import YamlConfig
 from flathunter.filter import Filter
 from flathunter.processor import ProcessorChain
@@ -110,11 +110,14 @@ class Hunter:
         logger.debug(f"Marked {crawler_name} as crawled at {time.time()}")
 
     def _record_crawler_success(self, crawler_name: str, num_results: int):
-        """Record a successful crawl"""
+        """Record a successful crawl and log immediately"""
         if num_results > 0:
             message = f"Listings successfully fetched, {num_results} new result{'s' if num_results != 1 else ''}"
+            color_count = f"{Colors.BRIGHT_GREEN}{num_results}{Colors.RESET}"
+            logger.info(f"{Colors.CYAN}[{crawler_name}]{Colors.RESET} Crawled → {color_count} new listing{'s' if num_results != 1 else ''}")
         else:
             message = "Listings successfully fetched, no new results"
+            logger.info(f"{Colors.DIM}[{crawler_name}]{Colors.RESET} Crawled → 0 new listings")
 
         self.crawler_status[crawler_name] = {
             'status': 'success',
@@ -123,23 +126,20 @@ class Hunter:
         }
 
     def _record_crawler_failure(self, crawler_name: str, error: str):
-        """Record a failed crawl"""
+        """Record a failed crawl and log immediately"""
+        logger.error(f"{Colors.BRIGHT_RED}[{crawler_name}]{Colors.RESET} Crawl failed → {error[:60]}")
         self.crawler_status[crawler_name] = {
             'status': 'error',
             'result_count': 0,
             'message': f"Error: {error[:80]}"
         }
 
-    def get_crawler_status_report(self) -> str:
-        """Generate a concise status report for active crawlers only"""
-        if not self.crawler_status:
-            return ""
-
-        lines = []
-        for crawler_name, status in self.crawler_status.items():
-            lines.append(f"[{crawler_name} Crawler] {status['message']}")
-
-        return "\n".join(lines)
+    def _is_auto_contactable(self, expose):
+        """Check if expose is from a site we auto-contact"""
+        crawler = expose.get('crawler', '').lower()
+        url = expose.get('url', '')
+        return ('willhaben' in crawler or 'willhaben.at' in url or
+                'wg-gesucht' in crawler or 'wg-gesucht.de' in url or 'wggesucht' in crawler)
 
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a listing is successfully contacted"""
@@ -235,25 +235,54 @@ class Hunter:
         result = []
         # We need to iterate over this list to force the evaluation of the pipeline
         for expose in processor_chain.process(self.crawl_for_exposes(max_pages)):
-            # Contact willhaben BEFORE logging/notifying
-            expose = self.willhaben_processor.process_expose(expose)
+            # Log the new listing found
+            try:
+                title = expose['title'][:55]
+                crawler_name = expose.get('crawler', 'Unknown')
 
-            # Contact wg-gesucht BEFORE logging/notifying
-            expose = self.wg_gesucht_processor.process_expose(expose)
+                # Check if this needs auto-contact
+                needs_contact = self._is_auto_contactable(expose)
 
-            # Send success notification if listing was successfully contacted
-            if expose.get('_auto_contacted'):
-                self._send_contact_success_notification(expose)
+                if needs_contact:
+                    # Show listing with auto-contact indicator
+                    logger.info(f"{Colors.BRIGHT_CYAN}→{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
+                    logger.info(f"  {Colors.YELLOW}↳{Colors.RESET} Initiating auto-contact...")
+                else:
+                    # Regular listing (Immobilienscout, etc.)
+                    logger.info(f"{Colors.CYAN}→{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
+            except Exception as e:
+                logger.error(f"Failed to log expose: {e}")
 
-            # Log the result
-            contacted_marker = "✅ [CONTACTED]" if expose.get('_auto_contacted') else ""
-            logger.info('New offer: %s %s', expose['title'], contacted_marker)
+            # Auto-contact processors
+            try:
+                expose = self.willhaben_processor.process_expose(expose)
+            except Exception as e:
+                logger.error(f"CRITICAL: Willhaben contact processor crashed (continuing): {e}", exc_info=True)
+                expose['_auto_contacted'] = False
+
+            try:
+                expose = self.wg_gesucht_processor.process_expose(expose)
+            except Exception as e:
+                logger.error(f"CRITICAL: WG-Gesucht contact processor crashed (continuing): {e}", exc_info=True)
+                expose['_auto_contacted'] = False
+
+            # Log contact result if auto-contact was attempted
+            if needs_contact:
+                try:
+                    if expose.get('_auto_contacted'):
+                        logger.info(f"  {Colors.BRIGHT_GREEN}✓{Colors.RESET} Successfully contacted!")
+                    else:
+                        logger.info(f"  {Colors.DIM}⊘{Colors.RESET} Not contacted (already sent or skipped)")
+                except Exception as e:
+                    logger.error(f"Failed to log contact result: {e}")
+
+            # Send telegram notification for successful contacts
+            try:
+                if expose.get('_auto_contacted'):
+                    self._send_contact_success_notification(expose)
+            except Exception as e:
+                logger.error(f"Failed to send contact success notification (continuing): {e}", exc_info=True)
 
             result.append(expose)
-
-        # Log crawler status report to show active crawler results
-        status_report = self.get_crawler_status_report()
-        if status_report:
-            logger.info("\n" + status_report)
 
         return result

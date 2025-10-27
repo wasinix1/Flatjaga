@@ -1,15 +1,47 @@
-"""Provides logger"""
+"""Provides logger with color support"""
 import logging
 import os
 from pprint import pformat
 
 
+# ANSI color codes for terminal output
+class Colors:
+    """ANSI color codes for prettier logging"""
+    if os.name == 'posix':
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        DIM = '\033[2m'
+
+        # Text colors
+        BLACK = '\033[30m'
+        RED = '\033[31m'
+        GREEN = '\033[32m'
+        YELLOW = '\033[33m'
+        BLUE = '\033[34m'
+        MAGENTA = '\033[35m'
+        CYAN = '\033[36m'
+        WHITE = '\033[37m'
+
+        # Bright colors
+        BRIGHT_RED = '\033[91m'
+        BRIGHT_GREEN = '\033[92m'
+        BRIGHT_YELLOW = '\033[93m'
+        BRIGHT_BLUE = '\033[94m'
+        BRIGHT_MAGENTA = '\033[95m'
+        BRIGHT_CYAN = '\033[96m'
+    else:
+        # No colors on Windows (unless ANSI support is enabled)
+        RESET = BOLD = DIM = ''
+        BLACK = RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = ''
+        BRIGHT_RED = BRIGHT_GREEN = BRIGHT_YELLOW = BRIGHT_BLUE = BRIGHT_MAGENTA = BRIGHT_CYAN = ''
+
+
 class LoggerHandler(logging.StreamHandler):
     """Formats logs and alters WebDriverManager's logs properties"""
 
-    _CYELLOW = '\033[93m' if os.name == 'posix' else ''
-    _CBLUE = '\033[94m' if os.name == 'posix' else ''
-    _COFF = '\033[0m' if os.name == 'posix' else ''
+    _CYELLOW = Colors.BRIGHT_YELLOW
+    _CBLUE = Colors.BRIGHT_BLUE
+    _COFF = Colors.RESET
     _FORMAT = '[' + _CBLUE + '%(asctime)s' + _COFF + \
               '|' + _CBLUE + '%(filename)-24s' + _COFF + \
               '|' + _CYELLOW + '%(levelname)-8s' + _COFF + \

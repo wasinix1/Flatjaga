@@ -9,6 +9,7 @@ import random
 import json
 import os
 import logging
+import signal
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -176,11 +177,50 @@ class WillhabenContactBot:
         logger.info("Browser started for Willhaben")
     
     def close(self):
-        """Close the browser"""
-        if self.driver:
-            self.driver.quit()
-        print("✓ Browser closed")
-        logger.info("Browser closed")
+        """Close the browser with timeout to prevent hanging"""
+        if not self.driver:
+            return
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Browser quit() operation timed out")
+
+        try:
+            # Set 10-second timeout for browser quit operation
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(10)
+
+            try:
+                self.driver.quit()
+                signal.alarm(0)  # Cancel alarm if quit succeeds
+                print("✓ Browser closed")
+                logger.info("Browser closed")
+            except TimeoutError:
+                signal.alarm(0)  # Cancel alarm
+                logger.error("Browser quit() timed out after 10s - forcing cleanup")
+
+                # Try to force kill the browser process
+                try:
+                    self.driver.service.process.kill()
+                    logger.warning("Killed browser process forcefully")
+                except Exception as e:
+                    logger.error(f"Could not force-kill browser: {e}")
+
+                print("✓ Browser closed (forced)")
+                logger.info("Browser closed (forced after timeout)")
+
+        except Exception as e:
+            signal.alarm(0)  # Always cancel alarm
+            logger.error(f"Error during browser close: {e}")
+
+            # Try force kill as last resort
+            try:
+                if hasattr(self, 'driver') and hasattr(self.driver, 'service'):
+                    self.driver.service.process.kill()
+                    logger.warning("Force-killed browser after error")
+            except:
+                pass
+        finally:
+            signal.alarm(0)  # Ensure alarm is always cancelled
     
     def save_cookies(self):
         """Save cookies to file for session persistence"""
@@ -291,6 +331,9 @@ class WillhabenContactBot:
             for attempt in range(max_attempts):
                 self._random_delay(0.3, 0.5)
 
+                if attempt > 0 and attempt % 5 == 0:
+                    logger.debug(f"Still looking for form/button... (attempt {attempt+1}/{max_attempts})")
+
                 # Check for popups at any time
                 self._handle_popups()
 
@@ -321,60 +364,92 @@ class WillhabenContactBot:
                 # If form found, process it
                 if form_found and form_type == "email":
                     # Email form: Check boxes
+                    # Viewing checkbox (optional)
                     try:
                         viewing_checkbox = self.driver.find_element(By.ID, "contactSuggestions-6")
                         if viewing_checkbox and not viewing_checkbox.is_selected():
                             self._try_click_element(viewing_checkbox, "viewing checkbox")
-                            logger.info("Checked viewing option")
+                            logger.info("✓ Checked viewing option")
                             self._random_delay(0.1, 0.2)
-                    except:
-                        pass
+                        else:
+                            logger.debug("Viewing checkbox already selected")
+                    except Exception as e:
+                        logger.debug(f"Viewing checkbox not found or not available: {e}")
 
+                    # Mietprofil checkbox (CRITICAL - must always be checked)
                     try:
                         mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
-                        if mietprofil_checkbox.is_enabled() and not mietprofil_checkbox.is_selected():
-                            self._try_click_element(mietprofil_checkbox, "mietprofil checkbox")
-                            logger.info("Checked mietprofil option")
-                            self._random_delay(0.1, 0.2)
-                    except:
-                        pass
+
+                        # Check current state
+                        is_enabled = mietprofil_checkbox.is_enabled()
+                        is_selected = mietprofil_checkbox.is_selected()
+
+                        if not is_enabled:
+                            logger.warning("⚠️ Mietprofil checkbox is DISABLED - cannot check it")
+                        elif is_selected:
+                            logger.info("✓ Mietprofil checkbox already checked")
+                        else:
+                            # Need to check it
+                            if self._try_click_element(mietprofil_checkbox, "mietprofil checkbox"):
+                                # Verify it was actually checked
+                                self._random_delay(0.1, 0.2)
+                                if mietprofil_checkbox.is_selected():
+                                    logger.info("✓ Mietprofil checkbox checked successfully")
+                                else:
+                                    logger.error("❌ CRITICAL: Mietprofil checkbox click failed - checkbox NOT checked!")
+                            else:
+                                logger.error("❌ CRITICAL: Failed to click Mietprofil checkbox")
+
+                        self._random_delay(0.1, 0.2)
+                    except Exception as e:
+                        logger.error(f"❌ CRITICAL: Could not find/check Mietprofil checkbox: {e}")
 
                     # Find submit button
                     try:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-mail"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
                             logger.info("Found email submit button")
-                            break
-                    except:
-                        pass
+                            break  # Exit loop - button found
+                    except Exception as e:
+                        logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Fill textarea if needed
+                    # Messaging form: Check if textarea needs filling (skip for logged-in users with pre-saved messages)
                     try:
                         message_textarea = self.driver.find_element(By.ID, "mailContent")
-                        if message_textarea and not message_textarea.get_attribute("value"):
-                            message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
-                            message_textarea.send_keys(message_text)
-                            logger.info("Filled message field")
-                            self._random_delay(0.1, 0.3)
-                    except:
-                        pass
+                        if message_textarea:
+                            # Check if textarea has any content using multiple methods
+                            # (pre-filled content for logged-in users might not show up in 'value' attribute)
+                            existing_value = message_textarea.get_attribute("value") or ""
+                            existing_text = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
+
+                            # Only fill if truly empty
+                            if not existing_value.strip() and not existing_text.strip():
+                                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                                message_textarea.send_keys(message_text)
+                                logger.info("Filled message field (was empty)")
+                                self._random_delay(0.1, 0.3)
+                            else:
+                                logger.info("Message field already has content - using pre-saved message")
+                                self._random_delay(0.1, 0.2)
+                    except Exception as e:
+                        logger.debug(f"Could not check/fill message field: {e}")
 
                     # Find submit button
                     try:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
                             logger.info("Found message submit button")
-                            break
-                    except:
-                        pass
+                            break  # Exit loop - button found
+                    except Exception as e:
+                        logger.debug(f"Could not find message submit button yet: {e}")
 
             if not form_found:
-                logger.error("Could not find contact form after multiple attempts")
+                logger.error(f"Could not find contact form after {max_attempts} attempts")
                 return False
 
             if not submit_button:
-                logger.error("Could not find submit button after multiple attempts")
+                logger.error(f"Could not find submit button after {max_attempts} attempts (form_type={form_type})")
                 return False
 
             # Submit the form with multiple click strategies
