@@ -361,34 +361,104 @@ class WgGesuchtContactBot:
                 return False
             
             self._random_delay(0.3, 0.7)
-            
-            # Click template label
+
+            # Click template label with smart wait
             try:
-                labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
-                if len(labels) <= self.template_index:
-                    logger.error(f"Template {self.template_index} not found (only {len(labels)} available)")
+                # Smart wait: Check if template labels are loaded (max 5 attempts over ~1.5s)
+                labels = None
+                for check_attempt in range(5):
+                    labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
+                    if labels and len(labels) > self.template_index:
+                        logger.info(f"✓ Template labels loaded (detected on check #{check_attempt+1})")
+                        break
+                    if check_attempt < 4:
+                        time.sleep(0.3)
+
+                if not labels or len(labels) <= self.template_index:
+                    logger.error(f"Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
                     return False
-                
+
                 label = labels[self.template_index]
-                self.driver.execute_script("arguments[0].click();", label)
-                logger.info(f"  ✓ Selected template {self.template_index}")
+
+                # Try multiple click strategies to ensure selection
+                clicked = False
+                strategies = [
+                    ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", label)),
+                    ("scroll and JS click", lambda: (
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", label),
+                        time.sleep(0.1),
+                        self.driver.execute_script("arguments[0].click();", label)
+                    )),
+                ]
+
+                for strategy_name, strategy_func in strategies:
+                    try:
+                        strategy_func()
+                        logger.info(f"  ✓ Selected template {self.template_index} using {strategy_name}")
+                        clicked = True
+                        break
+                    except Exception as e:
+                        logger.debug(f"{strategy_name} failed: {e}")
+
+                if not clicked:
+                    logger.error("All template selection strategies failed")
+                    return False
+
             except Exception as e:
                 logger.error(f"Could not select template: {e}")
                 return False
-            
+
             self._random_delay(0.3, 0.7)
-            
+
             # Click insert button in modal
             try:
                 insert_btn = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
                 )
                 self.driver.execute_script("arguments[0].click();", insert_btn)
-                logger.info("  ✓ Inserted template")
+                logger.info("  ✓ Clicked insert template button")
             except TimeoutException:
                 logger.error("Insert button not found")
                 return False
-            
+
+            # Verify template was actually inserted into message field
+            self._random_delay(0.3, 0.7)
+            try:
+                # Smart wait: Check if message field has content after insertion
+                message_field = None
+                has_content = False
+
+                for check_attempt in range(5):
+                    try:
+                        # Try common message field selectors
+                        message_field = self.driver.find_element(By.ID, "message_input")
+                    except:
+                        try:
+                            message_field = self.driver.find_element(By.NAME, "message")
+                        except:
+                            try:
+                                message_field = self.driver.find_element(By.CSS_SELECTOR, "textarea[name='message']")
+                            except:
+                                pass
+
+                    if message_field:
+                        content = message_field.get_attribute("value") or ""
+                        js_content = self.driver.execute_script("return arguments[0].value;", message_field) or ""
+
+                        if content.strip() or js_content.strip():
+                            has_content = True
+                            logger.info(f"✓ Template inserted successfully (verified on check #{check_attempt+1})")
+                            break
+
+                    if check_attempt < 4:
+                        time.sleep(0.3)
+
+                if not has_content:
+                    logger.warning("⚠️ Could not verify template was inserted - message field appears empty")
+
+            except Exception as e:
+                logger.debug(f"Template insertion verification failed: {e}")
+
             self._random_delay(0.5, 1)
             
             # Click send button
@@ -553,20 +623,47 @@ def contact_listing(driver, listing_url, template_index=0, timeout=10):
         except TimeoutException:
             raise ContactFailedException("Template selector modal didn't appear")
         
-        # Click checkbox at template_index (default 0 = first checkbox)
+        # Click checkbox at template_index (default 0 = first checkbox) with smart wait
         try:
-            # Find all checkboxes in the modal
-            checkboxes = driver.find_elements(By.XPATH, "//input[@type='checkbox']")
-            
-            if len(checkboxes) <= template_index:
-                raise ContactFailedException(f"Template index {template_index} not found (only {len(checkboxes)} templates available)")
-            
+            # Smart wait: Check if checkboxes are loaded (max 5 attempts over ~1.5s)
+            checkboxes = None
+            for check_attempt in range(5):
+                checkboxes = driver.find_elements(By.XPATH, "//input[@type='checkbox']")
+                if checkboxes and len(checkboxes) > template_index:
+                    print(f"  ✓ Template checkboxes loaded (check #{check_attempt+1})")
+                    break
+                if check_attempt < 4:
+                    time.sleep(0.3)
+
+            if not checkboxes or len(checkboxes) <= template_index:
+                raise ContactFailedException(f"Template index {template_index} not found (only {len(checkboxes) if checkboxes else 0} templates available)")
+
             # Click the checkbox at the specified index
             checkbox = checkboxes[template_index]
-            
-            # Sometimes checkboxes are hidden, need to click via JavaScript
-            driver.execute_script("arguments[0].click();", checkbox)
-            print(f"  ✓ Selected template at index {template_index}")
+
+            # Try multiple strategies to ensure selection
+            clicked = False
+            strategies = [
+                ("JavaScript click", lambda: driver.execute_script("arguments[0].click();", checkbox)),
+                ("set checked + events", lambda: driver.execute_script("""
+                    arguments[0].checked = true;
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
+                """, checkbox)),
+            ]
+
+            for strategy_name, strategy_func in strategies:
+                try:
+                    strategy_func()
+                    print(f"  ✓ Selected template {template_index} using {strategy_name}")
+                    clicked = True
+                    break
+                except Exception as e:
+                    print(f"  {strategy_name} failed: {e}")
+
+            if not clicked:
+                raise ContactFailedException("All template selection strategies failed")
+
         except Exception as e:
             raise ContactFailedException(f"Could not select template: {e}")
         

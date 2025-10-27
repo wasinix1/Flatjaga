@@ -377,13 +377,25 @@ class WillhabenContactBot:
                         logger.debug(f"Viewing checkbox not found or not available: {e}")
 
                     # Mietprofil checkbox (CRITICAL - must always be checked)
-                    # Wait a bit for any JavaScript to populate the checkbox state
-                    self._random_delay(0.3, 0.5)
-
+                    # Smart wait: Check if JavaScript has populated checkbox state (max 5 attempts over ~1.5s)
                     try:
                         mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
 
-                        # Get comprehensive state info for debugging
+                        checkbox_checked = False
+                        for check_attempt in range(5):
+                            is_selected = mietprofil_checkbox.is_selected()
+                            has_checked_attr = self.driver.execute_script("return arguments[0].checked;", mietprofil_checkbox)
+
+                            if is_selected or has_checked_attr:
+                                checkbox_checked = True
+                                logger.info(f"✓ Mietprofil checkbox already checked (detected on check #{check_attempt+1})")
+                                break
+
+                            # Quick delay between checks (total ~1.5s max if not checked)
+                            if check_attempt < 4:
+                                time.sleep(0.3)
+
+                        # Get full diagnostic info for logging
                         is_selected = mietprofil_checkbox.is_selected()
                         is_displayed = mietprofil_checkbox.is_displayed()
                         is_enabled = mietprofil_checkbox.is_enabled()
@@ -393,8 +405,8 @@ class WillhabenContactBot:
                         logger.info(f"Mietprofil checkbox state: selected={is_selected}, displayed={is_displayed}, "
                                    f"is_enabled()={is_enabled}, disabled_attr={has_disabled_attr}, checked_attr={has_checked_attr}")
 
-                        if is_selected or has_checked_attr:
-                            logger.info("✓ Mietprofil checkbox already checked")
+                        if checkbox_checked:
+                            pass  # Already logged above, nothing more to do
                         else:
                             # Checkbox is NOT checked - we MUST check it
                             logger.warning("⚠️ Mietprofil checkbox is NOT checked - attempting to check it...")
@@ -467,24 +479,35 @@ class WillhabenContactBot:
                         logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Check if textarea needs filling (skip for logged-in users with pre-saved messages)
+                    # Messaging form: Check if textarea needs filling
+                    # Wait for pre-filled content to load (for logged-in users with saved messages)
                     try:
                         message_textarea = self.driver.find_element(By.ID, "mailContent")
                         if message_textarea:
-                            # Check if textarea has any content using multiple methods
-                            # (pre-filled content for logged-in users might not show up in 'value' attribute)
-                            existing_value = message_textarea.get_attribute("value") or ""
-                            existing_text = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
+                            # Smart wait: Check for pre-filled content (max 5 attempts over ~1.5s)
+                            has_content = False
+                            for check_attempt in range(5):
+                                existing_value = message_textarea.get_attribute("value") or ""
+                                existing_text = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
 
-                            # Only fill if truly empty
-                            if not existing_value.strip() and not existing_text.strip():
+                                if existing_value.strip() or existing_text.strip():
+                                    has_content = True
+                                    logger.info(f"✓ Pre-filled message detected (check #{check_attempt+1})")
+                                    break
+
+                                # Quick delay between checks (total ~1.5s max if no content found)
+                                if check_attempt < 4:
+                                    time.sleep(0.3)
+
+                            if has_content:
+                                logger.info("Using pre-saved message template")
+                                self._random_delay(0.1, 0.2)
+                            else:
+                                # No pre-filled content found after waiting - fill with default
                                 message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
                                 message_textarea.send_keys(message_text)
-                                logger.info("Filled message field (was empty)")
+                                logger.warning("No pre-filled message found - using default message")
                                 self._random_delay(0.1, 0.3)
-                            else:
-                                logger.info("Message field already has content - using pre-saved message")
-                                self._random_delay(0.1, 0.2)
                     except Exception as e:
                         logger.debug(f"Could not check/fill message field: {e}")
 
