@@ -5,6 +5,7 @@ Detects browser crashes and restarts automatically
 
 from flathunter.logging import logger
 from flathunter.wg_gesucht_contact_bot import WgGesuchtContactBot, SessionExpiredException
+from flathunter.session_manager import SessionManager
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
 import json
@@ -15,7 +16,7 @@ from datetime import datetime
 class WgGesuchtContactProcessor:
     """Processor that auto-contacts WG-Gesucht listings - with crash recovery and headless fallback"""
 
-    def __init__(self, config, telegram_notifier=None, id_watch=None):
+    def __init__(self, config, telegram_notifier=None, id_watch=None, session_manager=None):
         """
         Initialize processor with config.
 
@@ -31,6 +32,7 @@ class WgGesuchtContactProcessor:
         self.total_errors = 0
         self.telegram_notifier = telegram_notifier
         self.id_watch = id_watch
+        self.session_manager = session_manager or SessionManager()
 
         # Get config options
         self.enabled = config.get('wg_gesucht_auto_contact', False)
@@ -46,7 +48,7 @@ class WgGesuchtContactProcessor:
         # Setup failure log file
         self.failure_log_file = Path.home() / '.wg_gesucht_contact_failures.jsonl'
 
-        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, title cross-ref enabled)")
+        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, title cross-ref enabled, session tracking enabled)")
 
     def _send_failure_notification(self, expose, error_message):
         """Send Telegram notification when contact fails"""
@@ -190,12 +192,107 @@ class WgGesuchtContactProcessor:
                 return False
 
             self.bot_ready = True
+
+            # Update session timestamp on successful initialization
+            self.session_manager.update_timestamp('wg_gesucht', valid=True)
+
             logger.info(f"✓ WG-Gesucht bot ready (headless={headless_mode}, stats: {self.total_contacted} contacted, {self.total_errors} errors)")
             return True
 
         except Exception as e:
             logger.error(f"Failed to start WG-Gesucht bot: {e}")
             return False
+
+    def keep_session_active(self):
+        """
+        Check and validate session to prevent expiry.
+        Opens browser if 2+ hours have passed since last validation.
+        Uses headless=false for stability during validation.
+        """
+        # Check if processor is enabled in config
+        if not self.enabled:
+            return True
+
+        # Check if processor is disabled by session manager
+        if not self.session_manager.is_enabled('wg_gesucht'):
+            logger.warning("WG-Gesucht processor is disabled - skipping session check")
+            return False
+
+        # Check if validation is needed
+        if not self.session_manager.needs_validation('wg_gesucht'):
+            return True
+
+        logger.info("WG-Gesucht session validation needed (2+ hours elapsed)")
+
+        # Start browser with headless=false for stability
+        temp_bot = None
+        try:
+            logger.info("Opening browser for session validation (headless=false)...")
+            temp_bot = WgGesuchtContactBot(
+                headless=False,
+                template_index=self.template_index,
+                delay_min=self.delay_min,
+                delay_max=self.delay_max
+            )
+            temp_bot.start()
+
+            # Load cookies and validate
+            if not temp_bot.load_cookies():
+                logger.error("No WG-Gesucht session found during validation")
+                self.session_manager.disable('wg_gesucht', "No session cookies found")
+
+                # Send telegram notification
+                if self.telegram_notifier:
+                    self.telegram_notifier.notify(
+                        "⚠️ WG-GESUCHT SESSION EXPIRED ⚠️\n\n"
+                        "Session cookies not found.\n"
+                        "Please run 'python setup_sessions.py' to re-login.\n\n"
+                        "Auto-contact for WG-Gesucht is now DISABLED until restart."
+                    )
+                return False
+
+            # Session valid flag should be set by load_cookies
+            if not temp_bot.session_valid:
+                logger.error("WG-Gesucht session validation failed")
+                self.session_manager.disable('wg_gesucht', "Session validation failed")
+
+                # Send telegram notification
+                if self.telegram_notifier:
+                    self.telegram_notifier.notify(
+                        "⚠️ WG-GESUCHT SESSION EXPIRED ⚠️\n\n"
+                        "Session validation failed.\n"
+                        "Please run 'python setup_sessions.py' to re-login.\n\n"
+                        "Auto-contact for WG-Gesucht is now DISABLED until restart."
+                    )
+                return False
+
+            # Session is valid
+            logger.info("✓ WG-Gesucht session validated successfully")
+            self.session_manager.update_timestamp('wg_gesucht', valid=True)
+            return True
+
+        except Exception as e:
+            logger.error(f"Session validation failed: {e}")
+            self.session_manager.disable('wg_gesucht', f"Validation error: {str(e)[:100]}")
+
+            # Send telegram notification
+            if self.telegram_notifier:
+                self.telegram_notifier.notify(
+                    f"⚠️ WG-GESUCHT SESSION VALIDATION FAILED ⚠️\n\n"
+                    f"Error: {str(e)[:200]}\n\n"
+                    f"Please run 'python setup_sessions.py' to re-login.\n\n"
+                    f"Auto-contact for WG-Gesucht is now DISABLED until restart."
+                )
+            return False
+
+        finally:
+            # Always close browser after validation
+            if temp_bot:
+                try:
+                    temp_bot.close()
+                    logger.info("Closed validation browser")
+                except Exception as e:
+                    logger.warning(f"Error closing validation browser: {e}")
 
     def process_expose(self, expose):
         """
@@ -210,6 +307,12 @@ class WgGesuchtContactProcessor:
 
         if 'wg-gesucht' not in url and 'wg_gesucht' not in crawler:
             return expose  # Not WG-Gesucht, pass through
+
+        # Check if processor is disabled
+        if not self.session_manager.is_enabled('wg_gesucht'):
+            logger.warning("WG-Gesucht processor is disabled - skipping listing")
+            expose['_auto_contacted'] = False
+            return expose
 
         # Check if title was already contacted (cross-platform check)
         if self.id_watch:
@@ -282,6 +385,18 @@ class WgGesuchtContactProcessor:
 
                     # Log failure with special category
                     self._log_failure_to_file(expose, str(e), "session_expired")
+
+                    # Disable processor until restart
+                    self.session_manager.disable('wg_gesucht', "Session expired during contact")
+
+                    # Send telegram notification
+                    if self.telegram_notifier:
+                        self.telegram_notifier.notify(
+                            "⚠️ WG-GESUCHT SESSION EXPIRED ⚠️\n\n"
+                            "Session expired while contacting listing.\n"
+                            "Please run 'python setup_sessions.py' to re-login.\n\n"
+                            "Auto-contact for WG-Gesucht is now DISABLED until restart."
+                        )
 
                     # Stop processing - session is expired, mark bot as not ready
                     self.bot_ready = False
@@ -371,7 +486,18 @@ class WgGesuchtContactProcessor:
                     elapsed = time.time() - start_time
                     logger.error(f"Session expired in non-headless mode ({elapsed:.1f}s)")
                     expose['_auto_contacted'] = False
-                    # Don't send notification for session expiration
+
+                    # Disable processor until restart
+                    self.session_manager.disable('wg_gesucht', "Session expired during non-headless retry")
+
+                    # Send telegram notification
+                    if self.telegram_notifier:
+                        self.telegram_notifier.notify(
+                            "⚠️ WG-GESUCHT SESSION EXPIRED ⚠️\n\n"
+                            "Session expired during non-headless retry.\n"
+                            "Please run 'python setup_sessions.py' to re-login.\n\n"
+                            "Auto-contact for WG-Gesucht is now DISABLED until restart."
+                        )
 
                 except Exception as e:
                     elapsed = time.time() - start_time
