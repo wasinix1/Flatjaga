@@ -291,6 +291,9 @@ class WillhabenContactBot:
             for attempt in range(max_attempts):
                 self._random_delay(0.3, 0.5)
 
+                if attempt > 0 and attempt % 5 == 0:
+                    logger.debug(f"Still looking for form/button... (attempt {attempt+1}/{max_attempts})")
+
                 # Check for popups at any time
                 self._handle_popups()
 
@@ -344,37 +347,47 @@ class WillhabenContactBot:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-mail"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
                             logger.info("Found email submit button")
-                            break
-                    except:
-                        pass
+                            break  # Exit loop - button found
+                    except Exception as e:
+                        logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Fill textarea if needed
+                    # Messaging form: Check if textarea needs filling (skip for logged-in users with pre-saved messages)
                     try:
                         message_textarea = self.driver.find_element(By.ID, "mailContent")
-                        if message_textarea and not message_textarea.get_attribute("value"):
-                            message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
-                            message_textarea.send_keys(message_text)
-                            logger.info("Filled message field")
-                            self._random_delay(0.1, 0.3)
-                    except:
-                        pass
+                        if message_textarea:
+                            # Check if textarea has any content using multiple methods
+                            # (pre-filled content for logged-in users might not show up in 'value' attribute)
+                            existing_value = message_textarea.get_attribute("value") or ""
+                            existing_text = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
+
+                            # Only fill if truly empty
+                            if not existing_value.strip() and not existing_text.strip():
+                                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                                message_textarea.send_keys(message_text)
+                                logger.info("Filled message field (was empty)")
+                                self._random_delay(0.1, 0.3)
+                            else:
+                                logger.info("Message field already has content - using pre-saved message")
+                                self._random_delay(0.1, 0.2)
+                    except Exception as e:
+                        logger.debug(f"Could not check/fill message field: {e}")
 
                     # Find submit button
                     try:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
                             logger.info("Found message submit button")
-                            break
-                    except:
-                        pass
+                            break  # Exit loop - button found
+                    except Exception as e:
+                        logger.debug(f"Could not find message submit button yet: {e}")
 
             if not form_found:
-                logger.error("Could not find contact form after multiple attempts")
+                logger.error(f"Could not find contact form after {max_attempts} attempts")
                 return False
 
             if not submit_button:
-                logger.error("Could not find submit button after multiple attempts")
+                logger.error(f"Could not find submit button after {max_attempts} attempts (form_type={form_type})")
                 return False
 
             # Submit the form with multiple click strategies
