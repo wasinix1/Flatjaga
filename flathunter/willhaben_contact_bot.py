@@ -15,7 +15,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from .stealth_driver import StealthDriver
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +48,11 @@ class WillhabenContactBot:
         self.options.add_experimental_option('useAutomationExtension', False)
 
         self.headless = headless
-        self.stealth_driver = None
         self.driver = None
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
         self.contacted_file = Path.home() / '.willhaben_contacted.json'
         self.contacted_listings = self._load_contacted_listings()
-        logger.info("Willhaben bot initialized (stealth mode enabled)")
+        logger.info("Willhaben bot initialized")
     
     def _load_contacted_listings(self):
         """Load the list of already contacted listing IDs"""
@@ -81,11 +79,7 @@ class WillhabenContactBot:
         if max_sec is None:
             max_sec = self.delay_max
 
-        # Delegate to stealth driver's smart_delay for better human-like behavior
-        if self.stealth_driver:
-            self.stealth_driver.smart_delay(min_sec, max_sec)
-        else:
-            time.sleep(random.uniform(min_sec, max_sec))
+        time.sleep(random.uniform(min_sec, max_sec))
     
     def accept_cookies(self):
         """Accept cookie banner if it appears - optimized for speed"""
@@ -134,18 +128,14 @@ class WillhabenContactBot:
             return False
     
     def start(self):
-        """Start the Stealth Chrome WebDriver"""
-        self.stealth_driver = StealthDriver(headless=self.headless)
-        self.stealth_driver.start()
-        self.driver = self.stealth_driver.driver
-        print("✓ Stealth browser started")
-        logger.info("Stealth browser started for Willhaben")
+        """Start the Chrome WebDriver"""
+        self.driver = webdriver.Chrome(options=self.options)
+        print("✓ Browser started")
+        logger.info("Browser started for Willhaben")
     
     def close(self):
         """Close the browser"""
-        if self.stealth_driver:
-            self.stealth_driver.quit()
-        elif self.driver:
+        if self.driver:
             self.driver.quit()
         print("✓ Browser closed")
         logger.info("Browser closed")
