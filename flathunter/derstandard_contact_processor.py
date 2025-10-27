@@ -1,0 +1,379 @@
+"""
+derStandard Auto-Contact Processor - WITH AUTO-RECOVERY
+Detects browser crashes and restarts automatically
+No login required - uses profile data
+"""
+
+from flathunter.logging import logger
+from flathunter.derstandard_contact_bot import DerStandardContactBot
+from flathunter.session_manager import SessionManager
+from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
+import time
+import json
+from pathlib import Path
+from datetime import datetime
+
+
+class DerStandardContactProcessor:
+    """Processor that auto-contacts derStandard listings - with crash recovery and headless fallback"""
+
+    def __init__(self, config, telegram_notifier=None, id_watch=None, session_manager=None):
+        self.config = config
+        self.bot = None
+        self.bot_ready = False
+        self.total_contacted = 0
+        self.total_errors = 0
+        self.telegram_notifier = telegram_notifier
+        self.id_watch = id_watch
+        self.session_manager = session_manager or SessionManager()
+
+        # Get config options
+        self.headless = config.get('derstandard_headless', True)
+        self.delay_min = config.get('derstandard_delay_min', 0.5)
+        self.delay_max = config.get('derstandard_delay_max', 2.0)
+        self.profile_path = config.get('derstandard_profile_path', None)
+
+        # Track headless mode for fallback
+        self.headless_original = self.headless  # Remember original setting
+        self.current_headless = self.headless  # Track current mode
+
+        # Setup failure log file
+        self.failure_log_file = Path.home() / '.derstandard_contact_failures.jsonl'
+
+        logger.info(f"derStandard auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled)")
+
+    def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
+        """Log contact failure to file with timestamp and details"""
+        try:
+            failure_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "url": expose.get('url', 'N/A'),
+                "title": expose.get('title', 'N/A'),
+                "error_type": error_type,
+                "error_message": str(error_message),
+                "total_errors": self.total_errors
+            }
+
+            # Append to JSONL file (one JSON object per line)
+            with open(self.failure_log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(failure_entry, ensure_ascii=False) + '\n')
+
+            logger.debug(f"Logged failure to {self.failure_log_file}")
+
+        except Exception as e:
+            logger.error(f"Failed to log failure to file: {e}")
+
+    def _send_failure_notification(self, expose, error_message):
+        """Send Telegram notification when contact fails"""
+        if not self.telegram_notifier:
+            return
+
+        try:
+            title = expose.get('title', 'Unknown listing')
+            url = expose.get('url', '')
+
+            failure_message = (
+                f"⚠️ DERSTANDARD KONTAKT FEHLGESCHLAGEN ⚠️\n\n"
+                f"Listing: {title}\n"
+                f"URL: {url}\n"
+                f"Fehler: {error_message[:200]}\n\n"
+                f"Gesamt Fehler: {self.total_errors}"
+            )
+
+            self.telegram_notifier.notify(failure_message)
+            logger.info(f"Sent failure notification for: {title}")
+
+        except Exception as e:
+            logger.error(f"Failed to send failure notification: {e}")
+
+    def _is_browser_dead(self, error):
+        """Check if error indicates browser crash"""
+        error_str = str(error).lower()
+        dead_indicators = [
+            'invalid session id',
+            'session deleted',
+            'browser has closed',
+            'disconnected: not connected to devtools',
+            'chrome not reachable'
+        ]
+        return any(indicator in error_str for indicator in dead_indicators)
+
+    def _restart_bot(self, use_headless=None, increase_delays=False):
+        """
+        Kill and restart the browser
+
+        Args:
+            use_headless: Override headless mode (None = use current setting)
+            increase_delays: If True, double the delays for more cautious approach
+        """
+        if use_headless is not None:
+            logger.warning(f"Browser crashed or disconnected - restarting with headless={use_headless}...")
+        else:
+            logger.warning("Browser crashed or disconnected - restarting...")
+
+        if increase_delays:
+            logger.info("Using higher delays for more cautious approach")
+
+        # Close old browser if it exists
+        if self.bot:
+            try:
+                self.bot.close()
+            except:
+                pass  # Already dead, that's fine
+
+        self.bot = None
+        self.bot_ready = False
+
+        # Wait a moment before restarting
+        time.sleep(2)
+
+        # Try to reinit with specified headless mode and delays
+        return self._init_bot(use_headless=use_headless, increase_delays=increase_delays)
+
+    def _init_bot(self, use_headless=None, increase_delays=False):
+        """
+        Lazy init the selenium bot
+
+        Args:
+            use_headless: Override headless mode (None = use current setting)
+            increase_delays: If True, double the delays for more cautious approach
+        """
+        if self.bot_ready:
+            return True
+
+        # Determine headless mode to use
+        if use_headless is not None:
+            headless_mode = use_headless
+            self.current_headless = use_headless
+        else:
+            headless_mode = self.current_headless
+
+        # Determine delays to use
+        if increase_delays:
+            delay_min = self.delay_min * 2
+            delay_max = self.delay_max * 2
+        else:
+            delay_min = self.delay_min
+            delay_max = self.delay_max
+
+        try:
+            logger.info(f"Starting derStandard contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s)...")
+            self.bot = DerStandardContactBot(
+                profile_path=self.profile_path,
+                headless=headless_mode,
+                delay_min=delay_min,
+                delay_max=delay_max
+            )
+            self.bot.start()
+
+            self.bot_ready = True
+
+            logger.info(f"✓ derStandard bot ready (headless={headless_mode}, stats: {self.total_contacted} contacted, {self.total_errors} errors)")
+            return True
+
+        except FileNotFoundError as e:
+            logger.error(f"Profile file not found: {e}")
+            logger.error("Please create a profile at profiles/derStandard_profile.json")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to start derStandard bot: {e}")
+            return False
+
+    def process_expose(self, expose):
+        """
+        Process a single expose - contact if derStandard
+        WITH AUTO-RECOVERY: Restarts browser if it crashes
+        WITH HEADLESS FALLBACK: Retries with headless=false if headless mode fails
+        WITH TITLE CROSS-REFERENCE: Prevents duplicate contacts across platforms
+        """
+        # Check if it's derStandard
+        crawler = expose.get('crawler', '').lower()
+        url = expose.get('url', '')
+
+        if 'derstandard' not in crawler and 'derstandard.at' not in url:
+            return expose  # Not derStandard, pass through
+
+        # Check if title was already contacted (cross-platform check)
+        if self.id_watch:
+            title = expose.get('title', '')
+            if self.id_watch.is_title_contacted(title):
+                logger.info(f"Skipping - title already contacted: {title[:50]}...")
+                expose['_auto_contacted'] = False
+                return expose
+
+        # Init bot if needed
+        if not self._init_bot():
+            logger.error("Failed to initialize bot - skipping listing")
+            expose['_auto_contacted'] = False
+            return expose
+
+        # Track if we should try headless fallback
+        tried_non_headless = False
+        tried_browser_restart = False
+
+        # Try to contact (with auto-recovery)
+        # Try 2 times, then restart browser with higher delays and try 2 more times
+        max_retries_per_attempt = 2
+        for browser_session in range(2):  # Two browser sessions: normal, then with higher delays
+            # If this is the second session, restart browser with higher delays
+            if browser_session == 1:
+                logger.warning("Failed twice - restarting browser with higher delays for more cautious approach")
+                if not self._restart_bot(increase_delays=True):
+                    logger.error("Failed to restart browser with higher delays")
+                    expose['_auto_contacted'] = False
+                    self._log_failure_to_file(expose, "Failed to restart browser with higher delays", "browser_restart_failed")
+                    break
+                tried_browser_restart = True
+
+            for attempt in range(max_retries_per_attempt):
+                start_time = time.time()
+                try:
+                    title = expose.get('title', 'Unknown')
+                    retry_msg = f" (session {browser_session+1}, attempt {attempt+1})" if browser_session > 0 or attempt > 0 else ""
+                    if retry_msg:
+                        logger.info(f"  Retry: {retry_msg}")
+
+                    success = self.bot.send_contact_message(url)
+
+                    elapsed = time.time() - start_time
+                    if success:
+                        self.total_contacted += 1
+                        logger.debug(f"Contact successful ({elapsed:.1f}s, total: {self.total_contacted})")
+                        expose['_auto_contacted'] = True
+
+                        # Mark title as contacted to prevent duplicates across platforms
+                        if self.id_watch:
+                            self.id_watch.mark_title_contacted(expose)
+
+                        # Reset to original headless mode after success
+                        if self.current_headless != self.headless_original:
+                            self.current_headless = self.headless_original
+                            logger.info(f"Resetting to headless={self.headless_original} for next listing")
+
+                        # Success - exit all retry loops
+                        browser_session = 999  # Break outer loop
+                        break
+                    else:
+                        logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
+                        expose['_auto_contacted'] = False
+                        # Not a success - continue to next attempt
+                        continue
+
+                except (InvalidSessionIdException, WebDriverException) as e:
+                    elapsed = time.time() - start_time
+
+                    if self._is_browser_dead(e):
+                        self.total_errors += 1
+                        error_msg = f"Browser crashed ({elapsed:.1f}s)"
+                        logger.error(error_msg)
+
+                        # Try to restart browser and retry within this session
+                        if attempt < max_retries_per_attempt - 1:
+                            if self._restart_bot(increase_delays=(browser_session == 1)):
+                                continue  # Try again with new browser
+                            else:
+                                logger.error("Failed to restart browser")
+                                expose['_auto_contacted'] = False
+                                self._log_failure_to_file(expose, "Failed to restart browser", "browser_crash")
+                                break
+                        else:
+                            # Max retries for this session - will try next session or give up
+                            logger.error(f"Max retries reached for session {browser_session+1}")
+                            expose['_auto_contacted'] = False
+                            self._log_failure_to_file(expose, f"Max retries reached in session {browser_session+1}", "browser_crash_max_retries")
+                            break
+                    else:
+                        # Some other WebDriver error
+                        self.total_errors += 1
+                        error_msg = f"WebDriver error ({elapsed:.1f}s): {e}"
+                        logger.error(error_msg)
+                        expose['_auto_contacted'] = False
+                        self._log_failure_to_file(expose, str(e), "webdriver_error")
+                        break
+
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    self.total_errors += 1
+                    error_msg = f"Unexpected error ({elapsed:.1f}s): {e}"
+                    logger.error(error_msg)
+                    expose['_auto_contacted'] = False
+                    self._log_failure_to_file(expose, str(e), "unexpected_error")
+                    break
+
+            # If we succeeded, break out of browser_session loop
+            if expose.get('_auto_contacted') == True:
+                break
+
+        # HEADLESS FALLBACK: If failed in headless mode, try with visible browser
+        if (expose.get('_auto_contacted') == False and
+            self.headless_original and
+            not tried_non_headless and
+            self.current_headless):
+
+            logger.warning("Contact failed in headless mode - trying with visible browser (headless=false)...")
+            tried_non_headless = True
+
+            # Restart browser in non-headless mode
+            if self._restart_bot(use_headless=False):
+                # Try one more time with visible browser
+                start_time = time.time()
+                try:
+                    title = expose.get('title', 'Unknown')
+                    logger.info(f"Auto-contacting with visible browser: {title[:50]}...")
+
+                    success = self.bot.send_contact_message(url)
+
+                    elapsed = time.time() - start_time
+                    if success:
+                        self.total_contacted += 1
+                        logger.info(f"✓ Contacted successfully with visible browser ({elapsed:.1f}s, total: {self.total_contacted})")
+                        expose['_auto_contacted'] = True
+
+                        # Mark title as contacted to prevent duplicates across platforms
+                        if self.id_watch:
+                            self.id_watch.mark_title_contacted(expose)
+
+                        # Success with non-headless - keep using it for consistency
+                        logger.info("Non-headless mode succeeded - will use it for remaining listings")
+                    else:
+                        logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
+                        expose['_auto_contacted'] = False
+                        # Now send notifications since all retry options exhausted
+                        self._send_failure_notification(expose, "Fehler auch mit sichtbarem Browser")
+
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    logger.error(f"Error in non-headless mode ({elapsed:.1f}s): {e}")
+                    expose['_auto_contacted'] = False
+                    # Send notification since all options exhausted
+                    self._send_failure_notification(expose, f"Fehler auch mit sichtbarem Browser: {str(e)[:100]}")
+            else:
+                logger.error("Failed to restart browser in non-headless mode")
+                # Send notification since we couldn't even try the fallback
+                self._send_failure_notification(expose, "Neustart mit sichtbarem Browser fehlgeschlagen")
+
+        # If we failed and didn't try headless fallback, send notification now
+        elif expose.get('_auto_contacted') == False and not tried_non_headless:
+            self._send_failure_notification(expose, "Kontakt fehlgeschlagen")
+
+        # Close browser after BOTH success AND failure to ensure fresh start for next listing
+        final_status = "success" if expose.get('_auto_contacted') == True else "failure"
+        logger.info(f"Closing browser after {final_status} to ensure fresh start for next listing")
+        if self.bot:
+            try:
+                self.bot.close()
+            except Exception as e:
+                logger.warning(f"Error closing browser after {final_status}: {e}")
+        self.bot = None
+        self.bot_ready = False
+
+        return expose
+
+    def close(self):
+        """Cleanup - call this when flathunter exits"""
+        if self.bot:
+            try:
+                logger.info(f"Closing derStandard bot (final stats: {self.total_contacted} contacted, {self.total_errors} errors)")
+                self.bot.close()
+            except Exception as e:
+                logger.error(f"Error closing bot: {e}")

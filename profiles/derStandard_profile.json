@@ -1,0 +1,11 @@
+{
+  "_comment": "derStandard.at Immobilien Auto-Contact Profile",
+  "_instructions": "Fill in your details below. All fields marked as required must be filled.",
+
+  "firstName": "Max",
+  "lastName": "Mustermann",
+  "email": "max.mustermann@example.com",
+  "phoneNumber": "+43 123 456789",
+
+  "message": "Guten Tag,\n\nich interessiere mich sehr für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+}
