@@ -70,7 +70,8 @@ class WgGesuchtContactBot:
     def start(self):
         """Start the bot and initialize the driver."""
         self._init_driver()
-        self._load_or_login()
+        # Note: Session loading is handled by load_cookies() method, called by processor
+        # Manual login should only happen in setup_sessions.py, not during automated runs
     
     def _random_delay(self, min_sec=None, max_sec=None):
         """Add random delay to mimic human behavior.
