@@ -380,25 +380,28 @@ class WillhabenContactBot:
                     try:
                         mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
 
-                        # Check current state
-                        is_enabled = mietprofil_checkbox.is_enabled()
+                        # Check if already selected first (most common case for default-checked boxes)
                         is_selected = mietprofil_checkbox.is_selected()
 
-                        if not is_enabled:
-                            logger.warning("⚠️ Mietprofil checkbox is DISABLED - cannot check it")
-                        elif is_selected:
+                        if is_selected:
                             logger.info("✓ Mietprofil checkbox already checked")
                         else:
-                            # Need to check it
-                            if self._try_click_element(mietprofil_checkbox, "mietprofil checkbox"):
-                                # Verify it was actually checked
-                                self._random_delay(0.1, 0.2)
-                                if mietprofil_checkbox.is_selected():
-                                    logger.info("✓ Mietprofil checkbox checked successfully")
-                                else:
-                                    logger.error("❌ CRITICAL: Mietprofil checkbox click failed - checkbox NOT checked!")
+                            # Check if it has disabled attribute using JavaScript (more reliable than is_enabled() for hidden inputs)
+                            is_disabled = self.driver.execute_script("return arguments[0].disabled;", mietprofil_checkbox)
+
+                            if is_disabled:
+                                logger.warning("⚠️ Mietprofil checkbox has disabled attribute - cannot check it")
                             else:
-                                logger.error("❌ CRITICAL: Failed to click Mietprofil checkbox")
+                                # Try to check it
+                                if self._try_click_element(mietprofil_checkbox, "mietprofil checkbox"):
+                                    # Verify it was actually checked
+                                    self._random_delay(0.1, 0.2)
+                                    if mietprofil_checkbox.is_selected():
+                                        logger.info("✓ Mietprofil checkbox checked successfully")
+                                    else:
+                                        logger.error("❌ CRITICAL: Mietprofil checkbox click failed - checkbox NOT checked!")
+                                else:
+                                    logger.error("❌ CRITICAL: Failed to click Mietprofil checkbox")
 
                         self._random_delay(0.1, 0.2)
                     except Exception as e:
