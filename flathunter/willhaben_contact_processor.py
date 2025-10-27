@@ -372,16 +372,16 @@ class WillhabenContactProcessor:
         elif expose.get('_auto_contacted') == False and not tried_non_headless:
             self._send_failure_notification(expose, "Kontakt fehlgeschlagen")
 
-        # Close browser after final failure to ensure fresh start for next listing
-        if expose.get('_auto_contacted') == False:
-            logger.info("Closing browser after failure to ensure fresh start for next listing")
-            if self.bot:
-                try:
-                    self.bot.close()
-                except Exception as e:
-                    logger.warning(f"Error closing browser after failure: {e}")
-            self.bot = None
-            self.bot_ready = False
+        # Close browser after BOTH success AND failure to ensure fresh start for next listing
+        final_status = "success" if expose.get('_auto_contacted') == True else "failure"
+        logger.info(f"Closing browser after {final_status} to ensure fresh start for next listing")
+        if self.bot:
+            try:
+                self.bot.close()
+            except Exception as e:
+                logger.warning(f"Error closing browser after {final_status}: {e}")
+        self.bot = None
+        self.bot_ready = False
 
         return expose
     
