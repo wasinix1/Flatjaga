@@ -19,6 +19,7 @@ from flathunter.crawler.wggesucht import WgGesucht
 from flathunter.crawler.willhaben import Willhaben
 from flathunter.crawler.vrmimmo import VrmImmo
 from flathunter.crawler.subito import Subito
+from flathunter.crawler.derstandard import DerStandard
 from flathunter.filter import Filter
 from flathunter.logging import logger
 from flathunter.exceptions import ConfigException
@@ -149,7 +150,8 @@ Preis: {price}
             Subito(self),
             Immobiliare(self),
             Idealista(self),
-            VrmImmo(self)
+            VrmImmo(self),
+            DerStandard(self)
         ]
 
     def check_deprecated(self):
