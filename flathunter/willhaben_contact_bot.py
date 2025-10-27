@@ -377,33 +377,83 @@ class WillhabenContactBot:
                         logger.debug(f"Viewing checkbox not found or not available: {e}")
 
                     # Mietprofil checkbox (CRITICAL - must always be checked)
+                    # Wait a bit for any JavaScript to populate the checkbox state
+                    self._random_delay(0.3, 0.5)
+
                     try:
                         mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
 
-                        # Check if already selected first (most common case for default-checked boxes)
+                        # Get comprehensive state info for debugging
                         is_selected = mietprofil_checkbox.is_selected()
+                        is_displayed = mietprofil_checkbox.is_displayed()
+                        is_enabled = mietprofil_checkbox.is_enabled()
+                        has_disabled_attr = self.driver.execute_script("return arguments[0].disabled;", mietprofil_checkbox)
+                        has_checked_attr = self.driver.execute_script("return arguments[0].checked;", mietprofil_checkbox)
 
-                        if is_selected:
+                        logger.info(f"Mietprofil checkbox state: selected={is_selected}, displayed={is_displayed}, "
+                                   f"is_enabled()={is_enabled}, disabled_attr={has_disabled_attr}, checked_attr={has_checked_attr}")
+
+                        if is_selected or has_checked_attr:
                             logger.info("✓ Mietprofil checkbox already checked")
                         else:
-                            # Check if it has disabled attribute using JavaScript (more reliable than is_enabled() for hidden inputs)
-                            is_disabled = self.driver.execute_script("return arguments[0].disabled;", mietprofil_checkbox)
+                            # Checkbox is NOT checked - we MUST check it
+                            logger.warning("⚠️ Mietprofil checkbox is NOT checked - attempting to check it...")
 
-                            if is_disabled:
-                                logger.warning("⚠️ Mietprofil checkbox has disabled attribute - cannot check it")
-                            else:
-                                # Try to check it
-                                if self._try_click_element(mietprofil_checkbox, "mietprofil checkbox"):
-                                    # Verify it was actually checked
-                                    self._random_delay(0.1, 0.2)
+                            # Try multiple strategies to check the box
+                            success = False
+
+                            # Strategy 1: Direct JavaScript click (bypasses visibility/enabled checks)
+                            try:
+                                self.driver.execute_script("arguments[0].click();", mietprofil_checkbox)
+                                self._random_delay(0.2, 0.3)
+                                if mietprofil_checkbox.is_selected():
+                                    logger.info("✓ Mietprofil checked via JavaScript click")
+                                    success = True
+                            except Exception as e:
+                                logger.debug(f"JavaScript click failed: {e}")
+
+                            # Strategy 2: Click the label (often works for styled checkboxes)
+                            if not success:
+                                try:
+                                    label = self.driver.find_element(By.CSS_SELECTOR, 'label[for="shareTenantProfile"]')
+                                    if not label:
+                                        # Try finding by the checkbox's parent label
+                                        label = self.driver.execute_script("return arguments[0].closest('label');", mietprofil_checkbox)
+                                    if label:
+                                        self.driver.execute_script("arguments[0].click();", label)
+                                        self._random_delay(0.2, 0.3)
+                                        if mietprofil_checkbox.is_selected():
+                                            logger.info("✓ Mietprofil checked via label click")
+                                            success = True
+                                except Exception as e:
+                                    logger.debug(f"Label click failed: {e}")
+
+                            # Strategy 3: Set checked property directly via JavaScript
+                            if not success:
+                                try:
+                                    self.driver.execute_script("""
+                                        arguments[0].checked = true;
+                                        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                                        arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
+                                    """, mietprofil_checkbox)
+                                    self._random_delay(0.2, 0.3)
                                     if mietprofil_checkbox.is_selected():
-                                        logger.info("✓ Mietprofil checkbox checked successfully")
-                                    else:
-                                        logger.error("❌ CRITICAL: Mietprofil checkbox click failed - checkbox NOT checked!")
-                                else:
-                                    logger.error("❌ CRITICAL: Failed to click Mietprofil checkbox")
+                                        logger.info("✓ Mietprofil checked via JavaScript property + events")
+                                        success = True
+                                except Exception as e:
+                                    logger.debug(f"JavaScript property set failed: {e}")
+
+                            # Final verification
+                            final_state = mietprofil_checkbox.is_selected()
+                            if success or final_state:
+                                logger.info(f"✓ Mietprofil checkbox is NOW checked (final verification: {final_state})")
+                            else:
+                                logger.error("❌ CRITICAL: All strategies failed - Mietprofil checkbox NOT checked!")
+                                logger.error(f"   This means the Mietprofil will NOT be sent with the contact request!")
 
                         self._random_delay(0.1, 0.2)
+                    except NoSuchElementException:
+                        logger.warning("⚠️ Mietprofil checkbox not found on this page (might not be available for this listing type)")
                     except Exception as e:
                         logger.error(f"❌ CRITICAL: Could not find/check Mietprofil checkbox: {e}")
 
