@@ -79,6 +79,38 @@ class WgGesuchtContactBot:
 
         time.sleep(random.uniform(min_sec, max_sec))
 
+    def _try_click_element(self, element, description="element"):
+        """Try multiple strategies to click an element.
+
+        Args:
+            element: Selenium WebElement to click
+            description: Description for logging
+
+        Returns:
+            True if click succeeded, False otherwise
+        """
+        strategies = [
+            ("normal click", lambda e: e.click()),
+            ("JavaScript click", lambda e: self.driver.execute_script("arguments[0].click();", e)),
+            ("scroll and click", lambda e: (
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", e),
+                time.sleep(0.1),
+                e.click()
+            )),
+        ]
+
+        for strategy_name, strategy_func in strategies:
+            try:
+                strategy_func(element)
+                logger.debug(f"✓ Clicked {description} using {strategy_name}")
+                return True
+            except Exception as e:
+                logger.debug(f"  {strategy_name} failed for {description}: {e}")
+                continue
+
+        logger.warning(f"✗ All click strategies failed for {description}")
+        return False
+
     def _init_driver(self):
         """Create Selenium driver."""
         chrome_options = Options()
