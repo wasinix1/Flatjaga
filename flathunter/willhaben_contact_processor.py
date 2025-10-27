@@ -94,17 +94,21 @@ class WillhabenContactProcessor:
         ]
         return any(indicator in error_str for indicator in dead_indicators)
     
-    def _restart_bot(self, use_headless=None):
+    def _restart_bot(self, use_headless=None, increase_delays=False):
         """
         Kill and restart the browser
 
         Args:
             use_headless: Override headless mode (None = use current setting)
+            increase_delays: If True, double the delays for more cautious approach
         """
         if use_headless is not None:
             logger.warning(f"Browser crashed or disconnected - restarting with headless={use_headless}...")
         else:
             logger.warning("Browser crashed or disconnected - restarting...")
+
+        if increase_delays:
+            logger.info("Using higher delays for more cautious approach")
 
         # Close old browser if it exists
         if self.bot:
@@ -119,15 +123,16 @@ class WillhabenContactProcessor:
         # Wait a moment before restarting
         time.sleep(2)
 
-        # Try to reinit with specified headless mode
-        return self._init_bot(use_headless=use_headless)
+        # Try to reinit with specified headless mode and delays
+        return self._init_bot(use_headless=use_headless, increase_delays=increase_delays)
 
-    def _init_bot(self, use_headless=None):
+    def _init_bot(self, use_headless=None, increase_delays=False):
         """
         Lazy init the selenium bot
 
         Args:
             use_headless: Override headless mode (None = use current setting)
+            increase_delays: If True, double the delays for more cautious approach
         """
         if self.bot_ready:
             return True
@@ -139,12 +144,20 @@ class WillhabenContactProcessor:
         else:
             headless_mode = self.current_headless
 
+        # Determine delays to use
+        if increase_delays:
+            delay_min = self.delay_min * 2
+            delay_max = self.delay_max * 2
+        else:
+            delay_min = self.delay_min
+            delay_max = self.delay_max
+
         try:
-            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={self.delay_min}-{self.delay_max}s)...")
+            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s)...")
             self.bot = WillhabenContactBot(
                 headless=headless_mode,
-                delay_min=self.delay_min,
-                delay_max=self.delay_max
+                delay_min=delay_min,
+                delay_max=delay_max
             )
             self.bot.start()
 
@@ -191,96 +204,114 @@ class WillhabenContactProcessor:
 
         # Track if we should try headless fallback
         tried_non_headless = False
+        tried_browser_restart = False
 
         # Try to contact (with auto-recovery)
-        max_retries = 1
-        for attempt in range(max_retries):
-            start_time = time.time()
-            try:
-                title = expose.get('title', 'Unknown')
-                logger.info(f"Auto-contacting: {title[:50]}..." + 
-                           (f" (retry {attempt+1})" if attempt > 0 else ""))
-                
-                success = self.bot.send_contact_message(url)
-                
-                elapsed = time.time() - start_time
-                if success:
-                    self.total_contacted += 1
-                    logger.info(f"✓ Contacted successfully ({elapsed:.1f}s, total: {self.total_contacted})")
-                    expose['_auto_contacted'] = True
-
-                    # Mark title as contacted to prevent duplicates across platforms
-                    if self.id_watch:
-                        self.id_watch.mark_title_contacted(expose)
-
-                    # Reset to original headless mode after success
-                    if self.current_headless != self.headless_original:
-                        self.current_headless = self.headless_original
-                        logger.info(f"Resetting to headless={self.headless_original} for next listing")
-                else:
-                    logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
+        # Try 2 times, then restart browser with higher delays and try 2 more times
+        max_retries_per_attempt = 2
+        for browser_session in range(2):  # Two browser sessions: normal, then with higher delays
+            # If this is the second session, restart browser with higher delays
+            if browser_session == 1:
+                logger.warning("Failed twice - restarting browser with higher delays for more cautious approach")
+                if not self._restart_bot(increase_delays=True):
+                    logger.error("Failed to restart browser with higher delays")
                     expose['_auto_contacted'] = False
+                    self._log_failure_to_file(expose, "Failed to restart browser with higher delays", "browser_restart_failed")
+                    break
+                tried_browser_restart = True
 
-                # Success - break out of retry loop
-                break
+            for attempt in range(max_retries_per_attempt):
+                start_time = time.time()
+                try:
+                    title = expose.get('title', 'Unknown')
+                    retry_msg = f" (session {browser_session+1}, attempt {attempt+1})" if browser_session > 0 or attempt > 0 else ""
+                    logger.info(f"Auto-contacting: {title[:50]}...{retry_msg}")
 
-            except SessionExpiredException as e:
-                elapsed = time.time() - start_time
-                self.total_errors += 1
-                logger.error(f"Session expired ({elapsed:.1f}s) - run 'python setup_sessions.py' to re-login")
-                expose['_auto_contacted'] = False
+                    success = self.bot.send_contact_message(url)
 
-                # Log failure with special category
-                self._log_failure_to_file(expose, str(e), "session_expired")
+                    elapsed = time.time() - start_time
+                    if success:
+                        self.total_contacted += 1
+                        logger.info(f"✓ Contacted successfully ({elapsed:.1f}s, total: {self.total_contacted})")
+                        expose['_auto_contacted'] = True
 
-                # Stop processing - session is expired, mark bot as not ready
-                self.bot_ready = False
-                # Don't try headless fallback for session expiration
-                tried_non_headless = True
-                break
+                        # Mark title as contacted to prevent duplicates across platforms
+                        if self.id_watch:
+                            self.id_watch.mark_title_contacted(expose)
 
-            except (InvalidSessionIdException, WebDriverException) as e:
-                elapsed = time.time() - start_time
+                        # Reset to original headless mode after success
+                        if self.current_headless != self.headless_original:
+                            self.current_headless = self.headless_original
+                            logger.info(f"Resetting to headless={self.headless_original} for next listing")
 
-                if self._is_browser_dead(e):
-                    self.total_errors += 1
-                    error_msg = f"Browser crashed ({elapsed:.1f}s)"
-                    logger.error(error_msg)
-
-                    # Try to restart browser and retry
-                    if attempt < max_retries - 1:
-                        if self._restart_bot():
-                            continue  # Try again with new browser
-                        else:
-                            logger.error("Failed to restart browser")
-                            expose['_auto_contacted'] = False
-                            # Log failure but don't notify yet - might try headless fallback
-                            self._log_failure_to_file(expose, "Failed to restart browser", "browser_crash")
-                            break
-                    else:
-                        logger.error("Max retries reached")
-                        expose['_auto_contacted'] = False
-                        # Log failure but don't notify yet - might try headless fallback
-                        self._log_failure_to_file(expose, "Max retries reached after browser crash", "browser_crash_max_retries")
+                        # Success - exit all retry loops
+                        browser_session = 999  # Break outer loop
                         break
-                else:
-                    # Some other WebDriver error
+                    else:
+                        logger.debug(f"Already contacted or skipped ({elapsed:.1f}s)")
+                        expose['_auto_contacted'] = False
+                        # Not a success - continue to next attempt
+                        continue
+
+                except SessionExpiredException as e:
+                    elapsed = time.time() - start_time
                     self.total_errors += 1
-                    error_msg = f"WebDriver error ({elapsed:.1f}s): {e}"
-                    logger.error(error_msg)
+                    logger.error(f"Session expired ({elapsed:.1f}s) - run 'python setup_sessions.py' to re-login")
                     expose['_auto_contacted'] = False
-                    # Log failure but don't notify yet - might try headless fallback
-                    self._log_failure_to_file(expose, str(e), "webdriver_error")
+
+                    # Log failure with special category
+                    self._log_failure_to_file(expose, str(e), "session_expired")
+
+                    # Stop processing - session is expired, mark bot as not ready
+                    self.bot_ready = False
+                    # Don't try headless fallback for session expiration
+                    tried_non_headless = True
+                    browser_session = 999  # Break outer loop
                     break
 
-            except Exception as e:
-                elapsed = time.time() - start_time
-                self.total_errors += 1
-                error_msg = f"Unexpected error ({elapsed:.1f}s): {e}"
-                logger.error(error_msg)
-                expose['_auto_contacted'] = False
-                # Log failure but don't notify yet - might try headless fallback
-                self._log_failure_to_file(expose, str(e), "unexpected_error")
+                except (InvalidSessionIdException, WebDriverException) as e:
+                    elapsed = time.time() - start_time
+
+                    if self._is_browser_dead(e):
+                        self.total_errors += 1
+                        error_msg = f"Browser crashed ({elapsed:.1f}s)"
+                        logger.error(error_msg)
+
+                        # Try to restart browser and retry within this session
+                        if attempt < max_retries_per_attempt - 1:
+                            if self._restart_bot(increase_delays=(browser_session == 1)):
+                                continue  # Try again with new browser
+                            else:
+                                logger.error("Failed to restart browser")
+                                expose['_auto_contacted'] = False
+                                self._log_failure_to_file(expose, "Failed to restart browser", "browser_crash")
+                                break
+                        else:
+                            # Max retries for this session - will try next session or give up
+                            logger.error(f"Max retries reached for session {browser_session+1}")
+                            expose['_auto_contacted'] = False
+                            self._log_failure_to_file(expose, f"Max retries reached in session {browser_session+1}", "browser_crash_max_retries")
+                            break
+                    else:
+                        # Some other WebDriver error
+                        self.total_errors += 1
+                        error_msg = f"WebDriver error ({elapsed:.1f}s): {e}"
+                        logger.error(error_msg)
+                        expose['_auto_contacted'] = False
+                        self._log_failure_to_file(expose, str(e), "webdriver_error")
+                        break
+
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    self.total_errors += 1
+                    error_msg = f"Unexpected error ({elapsed:.1f}s): {e}"
+                    logger.error(error_msg)
+                    expose['_auto_contacted'] = False
+                    self._log_failure_to_file(expose, str(e), "unexpected_error")
+                    break
+
+            # If we succeeded, break out of browser_session loop
+            if expose.get('_auto_contacted') == True:
                 break
 
         # HEADLESS FALLBACK: If failed in headless mode, try with visible browser
@@ -340,6 +371,17 @@ class WillhabenContactProcessor:
         # If we failed and didn't try headless fallback, send notification now
         elif expose.get('_auto_contacted') == False and not tried_non_headless:
             self._send_failure_notification(expose, "Kontakt fehlgeschlagen")
+
+        # Close browser after final failure to ensure fresh start for next listing
+        if expose.get('_auto_contacted') == False:
+            logger.info("Closing browser after failure to ensure fresh start for next listing")
+            if self.bot:
+                try:
+                    self.bot.close()
+                except Exception as e:
+                    logger.warning(f"Error closing browser after failure: {e}")
+            self.bot = None
+            self.bot_ready = False
 
         return expose
     
