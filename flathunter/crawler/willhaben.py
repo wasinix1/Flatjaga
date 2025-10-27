@@ -34,7 +34,7 @@ class Willhaben(Crawler):
                 if details:
                     entries.append(details)
 
-            logger.info('Successfully extracted %d out of %d listings', len(entries), len(listings))
+            logger.debug('Successfully extracted %d out of %d Willhaben listings', len(entries), len(listings))
 
         except Exception as e:
             logger.error("Error extracting data from Willhaben page: %s", str(e), exc_info=True)

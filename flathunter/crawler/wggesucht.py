@@ -226,7 +226,7 @@ class WgGesucht(Crawler):
                     continue
                 entries.append(details)
 
-            logger.info('Successfully extracted %d out of %d visible listings', len(entries), len(existing_findings))
+            logger.debug('Successfully extracted %d out of %d WG-Gesucht listings', len(entries), len(existing_findings))
 
         except Exception as e:
             logger.error("Error extracting data from WG-Gesucht page: %s", str(e), exc_info=True)

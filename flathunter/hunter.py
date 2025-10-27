@@ -141,6 +141,25 @@ class Hunter:
 
         return "\n".join(lines)
 
+    def _log_crawl_summary(self):
+        """Log a single-line summary of crawl results"""
+        if not self.crawler_status:
+            return
+
+        parts = []
+        for crawler_name, status in self.crawler_status.items():
+            count = status.get('result_count', 0)
+            if status['status'] == 'success':
+                if count > 0:
+                    parts.append(f"{crawler_name}: {count} new")
+                else:
+                    parts.append(f"{crawler_name}: 0")
+            else:
+                parts.append(f"{crawler_name}: error")
+
+        if parts:
+            logger.info(f"Crawled → {' | '.join(parts)}")
+
     def _send_contact_success_notification(self, expose):
         """Send a follow-up notification when a listing is successfully contacted"""
         if not self.telegram_notifier:
@@ -235,25 +254,40 @@ class Hunter:
         result = []
         # We need to iterate over this list to force the evaluation of the pipeline
         for expose in processor_chain.process(self.crawl_for_exposes(max_pages)):
-            # Contact willhaben BEFORE logging/notifying
-            expose = self.willhaben_processor.process_expose(expose)
+            try:
+                # Contact willhaben BEFORE logging/notifying
+                expose = self.willhaben_processor.process_expose(expose)
+            except Exception as e:
+                logger.error(f"CRITICAL: Willhaben contact processor crashed (continuing): {e}", exc_info=True)
+                expose['_auto_contacted'] = False
 
-            # Contact wg-gesucht BEFORE logging/notifying
-            expose = self.wg_gesucht_processor.process_expose(expose)
+            try:
+                # Contact wg-gesucht BEFORE logging/notifying
+                expose = self.wg_gesucht_processor.process_expose(expose)
+            except Exception as e:
+                logger.error(f"CRITICAL: WG-Gesucht contact processor crashed (continuing): {e}", exc_info=True)
+                expose['_auto_contacted'] = False
 
-            # Send success notification if listing was successfully contacted
-            if expose.get('_auto_contacted'):
-                self._send_contact_success_notification(expose)
+            try:
+                # Send success notification if listing was successfully contacted
+                if expose.get('_auto_contacted'):
+                    self._send_contact_success_notification(expose)
+            except Exception as e:
+                logger.error(f"Failed to send contact success notification (continuing): {e}", exc_info=True)
 
-            # Log the result
-            contacted_marker = "✅ [CONTACTED]" if expose.get('_auto_contacted') else ""
-            logger.info('New offer: %s %s', expose['title'], contacted_marker)
+            # Log the result - simple one-liner
+            try:
+                contacted_marker = " ✓ Contacted" if expose.get('_auto_contacted') else ""
+                logger.info(f"→ {expose['title'][:60]}{contacted_marker}")
+            except Exception as e:
+                logger.error(f"Failed to log expose result: {e}")
 
             result.append(expose)
 
-        # Log crawler status report to show active crawler results
-        status_report = self.get_crawler_status_report()
-        if status_report:
-            logger.info("\n" + status_report)
+        # Log crawler status report - consolidated single line
+        try:
+            self._log_crawl_summary()
+        except Exception as e:
+            logger.error(f"Failed to log crawler summary: {e}")
 
         return result
