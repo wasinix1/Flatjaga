@@ -112,12 +112,12 @@ class Hunter:
     def _record_crawler_success(self, crawler_name: str, num_results: int):
         """Record a successful crawl and log immediately"""
         if num_results > 0:
-            message = f"Listings successfully fetched, {num_results} new result{'s' if num_results != 1 else ''}"
-            color_count = f"{Colors.BRIGHT_GREEN}{num_results}{Colors.RESET}"
-            logger.info(f"{Colors.CYAN}[{crawler_name}]{Colors.RESET} Crawled → {color_count} new listing{'s' if num_results != 1 else ''}")
+            message = f"Listings successfully fetched, {num_results} result{'s' if num_results != 1 else ''}"
+            color_count = f"{Colors.DIM}{num_results}{Colors.RESET}"
+            logger.info(f"{Colors.DIM}[{crawler_name}]{Colors.RESET} Crawled → {color_count} listing{'s' if num_results != 1 else ''}")
         else:
-            message = "Listings successfully fetched, no new results"
-            logger.info(f"{Colors.DIM}[{crawler_name}]{Colors.RESET} Crawled → 0 new listings")
+            message = "Listings successfully fetched, no results"
+            logger.info(f"{Colors.DIM}[{crawler_name}]{Colors.RESET} Crawled → 0 listings")
 
         self.crawler_status[crawler_name] = {
             'status': 'success',
@@ -149,13 +149,8 @@ class Hunter:
 
         try:
             title = expose.get('title', 'Unknown listing')
-            url = expose.get('url', '')
 
-            success_message = (
-                f"✅ ERFOLGREICH KONTAKTIERT ✅\n\n"
-                f"Listing: {title}\n"
-                f"URL: {url}"
-            )
+            success_message = f"✅ Kontaktiert\n{title}"
 
             self.telegram_notifier.notify(success_message)
             logger.info(f"✓ Sent success notification for: {title}")
@@ -245,11 +240,11 @@ class Hunter:
 
                 if needs_contact:
                     # Show listing with auto-contact indicator
-                    logger.info(f"{Colors.BRIGHT_CYAN}→{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
+                    logger.info(f"{Colors.BRIGHT_GREEN}NEW LISTING ->{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
                     logger.info(f"  {Colors.YELLOW}↳{Colors.RESET} Initiating auto-contact...")
                 else:
                     # Regular listing (Immobilienscout, etc.)
-                    logger.info(f"{Colors.CYAN}→{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
+                    logger.info(f"{Colors.BRIGHT_GREEN}NEW LISTING ->{Colors.RESET} {title} {Colors.DIM}[{crawler_name}]{Colors.RESET}")
             except Exception as e:
                 logger.error(f"Failed to log expose: {e}")
 
