@@ -249,15 +249,9 @@ class WillhabenContactBot:
                 self.driver.execute_script("arguments[0].click();", viewing_checkbox)
                 self._random_delay(0.3, 0.8)
                 
-                # Check if Mietprofil checkbox exists and is enabled
-                try:
-                    mietprofil_checkbox = self.driver.find_element(By.ID, "shareTenantProfile")
-                    if mietprofil_checkbox.is_enabled():
-                        print("→ Checking 'Mietprofil teilen' box...")
-                        self.driver.execute_script("arguments[0].click();", mietprofil_checkbox)
-                        self._random_delay(0.3, 0.8)
-                except NoSuchElementException:
-                    print("  (Mietprofil checkbox not available)")
+                # Mietprofil checkbox: Should be auto-checked for logged-in users
+                # We don't interact with it to avoid race conditions with React hydration
+                print("  (Mietprofil checkbox should be auto-checked)")
                 
                 # Find and click the email submit button
                 print("→ Clicking email submit button...")
