@@ -128,13 +128,14 @@ class WillhabenContactProcessor:
         # Try to reinit with specified headless mode and delays
         return self._init_bot(use_headless=use_headless, increase_delays=increase_delays)
 
-    def _init_bot(self, use_headless=None, increase_delays=False):
+    def _init_bot(self, use_headless=None, increase_delays=False, _retry_with_visible=True):
         """
-        Lazy init the selenium bot
+        Lazy init the selenium bot with automatic fallback to visible browser
 
         Args:
             use_headless: Override headless mode (None = use current setting)
             increase_delays: If True, double the delays for more cautious approach
+            _retry_with_visible: Internal flag to control fallback retry (prevents infinite recursion)
         """
         if self.bot_ready:
             return True
@@ -168,6 +169,20 @@ class WillhabenContactProcessor:
                     "No willhaben session found. "
                     "Run 'python setup_sessions.py' to login first."
                 )
+
+                # FALLBACK: If headless mode and we haven't tried visible browser yet
+                if headless_mode and _retry_with_visible and self.headless_original:
+                    logger.warning("Session loading failed in headless mode - retrying with visible browser...")
+                    # Close failed bot
+                    if self.bot:
+                        try:
+                            self.bot.close()
+                        except:
+                            pass
+                    self.bot = None
+                    # Retry with visible browser (don't retry again to prevent infinite loop)
+                    return self._init_bot(use_headless=False, increase_delays=increase_delays, _retry_with_visible=False)
+
                 return False
 
             self.bot_ready = True
@@ -180,6 +195,20 @@ class WillhabenContactProcessor:
 
         except Exception as e:
             logger.error(f"Failed to start willhaben bot: {e}")
+
+            # FALLBACK: If headless mode and we haven't tried visible browser yet
+            if headless_mode and _retry_with_visible and self.headless_original:
+                logger.warning(f"Bot initialization failed in headless mode ({e}) - retrying with visible browser...")
+                # Close failed bot
+                if self.bot:
+                    try:
+                        self.bot.close()
+                    except:
+                        pass
+                self.bot = None
+                # Retry with visible browser (don't retry again to prevent infinite loop)
+                return self._init_bot(use_headless=False, increase_delays=increase_delays, _retry_with_visible=False)
+
             return False
 
     def keep_session_active(self):
