@@ -32,32 +32,26 @@ class SenderTelegram(Processor, Notifier):
 
     def process_expose(self, expose):
         """Send a message to a user describing the expose"""
-        # Create inline keyboard for description button
-        inline_keyboard = self.__create_inline_keyboard(expose)
-
         self.__broadcast(
             receivers=self.receiver_ids,
             message=self.__get_text_message(expose),
             images=self.__get_images(expose),
-            inline_keyboard=inline_keyboard,
         )
         return expose
 
     def __broadcast(self,
                     receivers: List[int],
                     message: str,
-                    images: Optional[List[str]] = None,
-                    inline_keyboard: Optional[Dict] = None) -> None:
+                    images: Optional[List[str]] = None) -> None:
         """
         Broadcast given message to the given receiver ids
         :param receivers: list of user/group ids
         :param message: text message to send to users
         :param images: images to send to users as a reply to message
-        :param inline_keyboard: optional inline keyboard markup
         :return: None
         """
         for receiver in receivers:
-            msg = self.__send_text(receiver, message, inline_keyboard)
+            msg = self.__send_text(receiver, message)
             if not msg:
                 continue
 
@@ -72,13 +66,12 @@ class SenderTelegram(Processor, Notifier):
         """
         self.__broadcast(self.receiver_ids, message, None)
 
-    def __send_text(self, chat_id: int, message: str, inline_keyboard: Optional[Dict] = None) -> Dict:
+    def __send_text(self, chat_id: int, message: str) -> Dict:
         """
         Send bot text message, the message may contain a simple
         heartbeat message or an apartment information
         :param chat_id: the receiver id
         :param message: the body of the message
-        :param inline_keyboard: optional inline keyboard markup
         :return: sent message information
         """
 
@@ -86,11 +79,6 @@ class SenderTelegram(Processor, Notifier):
             'chat_id': str(chat_id),
             'text': message,
         }
-
-        # Add inline keyboard if provided
-        if inline_keyboard:
-            payload['reply_markup'] = json.dumps(inline_keyboard)
-
         logger.debug(('token:', self.bot_token))
         logger.debug(('chat_id:', chat_id))
         logger.debug(('text:', message))
@@ -167,36 +155,6 @@ class SenderTelegram(Processor, Notifier):
                 time.sleep(min(backoff, 30))
                 return None
         return None
-
-    def __create_inline_keyboard(self, expose: Dict) -> Optional[Dict]:
-        """
-        Create an inline keyboard with a "Show Description" button
-
-        :param expose: The expose dictionary
-        :return: Inline keyboard markup dict, or None if expose has no ID
-        """
-        listing_id = expose.get('id')
-        crawler = expose.get('crawler', 'Willhaben')
-
-        if not listing_id:
-            return None
-
-        # Create callback data: "desc_<listing_id>_<crawler>"
-        callback_data = f"desc_{listing_id}_{crawler}"
-
-        # Inline keyboard with one row, one button
-        inline_keyboard = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "📄 Beschreibung anzeigen",
-                        "callback_data": callback_data
-                    }
-                ]
-            ]
-        }
-
-        return inline_keyboard
 
     def __get_images(self, expose: Dict) -> List[str]:
         return expose.get("images", [])

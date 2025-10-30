@@ -371,22 +371,6 @@ class WillhabenContactProcessor:
                         if self.id_watch:
                             self.id_watch.mark_title_contacted(expose)
 
-                        # Extract description while browser is still open (non-blocking)
-                        try:
-                            logger.debug("Extracting description from listing page...")
-                            description = self.bot.extract_description()
-                            if description and self.id_watch:
-                                # Save description to database
-                                listing_id = expose.get('id')
-                                crawler = expose.get('crawler', 'Willhaben')
-                                self.id_watch.update_expose_description(listing_id, crawler, description)
-                                logger.info(f"✓ Saved description ({len(description)} chars) for listing {listing_id}")
-                            elif not description:
-                                logger.debug("No description found on page")
-                        except Exception as e:
-                            # Don't fail the whole contact process if description extraction fails
-                            logger.warning(f"Failed to extract/save description: {e}")
-
                         # Reset to original headless mode after success
                         if self.current_headless != self.headless_original:
                             self.current_headless = self.headless_original
@@ -502,22 +486,6 @@ class WillhabenContactProcessor:
                         # Mark title as contacted to prevent duplicates across platforms
                         if self.id_watch:
                             self.id_watch.mark_title_contacted(expose)
-
-                        # Extract description while browser is still open (non-blocking)
-                        try:
-                            logger.debug("Extracting description from listing page...")
-                            description = self.bot.extract_description()
-                            if description and self.id_watch:
-                                # Save description to database
-                                listing_id = expose.get('id')
-                                crawler = expose.get('crawler', 'Willhaben')
-                                self.id_watch.update_expose_description(listing_id, crawler, description)
-                                logger.info(f"✓ Saved description ({len(description)} chars) for listing {listing_id}")
-                            elif not description:
-                                logger.debug("No description found on page")
-                        except Exception as e:
-                            # Don't fail the whole contact process if description extraction fails
-                            logger.warning(f"Failed to extract/save description: {e}")
 
                         # Success with non-headless - keep using it for consistency
                         logger.info("Non-headless mode succeeded - will use it for remaining listings")
