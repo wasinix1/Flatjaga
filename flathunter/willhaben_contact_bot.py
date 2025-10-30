@@ -483,7 +483,53 @@ class WillhabenContactBot:
         except Exception as e:
             logger.error(f"Error sending message: {str(e)}")
             return False
-    
+
+    def extract_description(self):
+        """
+        Extract the full description text from the currently loaded listing page.
+        Should be called after successfully contacting a listing (while page is still loaded).
+
+        Returns:
+            str: The description text, or empty string if not found
+        """
+        try:
+            # Find the description element
+            description_elem = self.driver.find_element(
+                By.CSS_SELECTOR,
+                'div[data-testid="ad-description-Objektbeschreibung"]'
+            )
+
+            if description_elem and description_elem.is_displayed():
+                # Get inner HTML to preserve line breaks
+                description_html = description_elem.get_attribute('innerHTML')
+
+                # Replace <br> tags with newlines
+                description_text = description_html.replace('<br>', '\n')
+
+                # Remove other HTML tags (simple approach)
+                import re
+                description_text = re.sub(r'<[^>]+>', '', description_text)
+
+                # Decode HTML entities
+                import html
+                description_text = html.unescape(description_text)
+
+                # Clean up excessive whitespace
+                description_text = description_text.strip()
+
+                logger.debug(f"Extracted description ({len(description_text)} chars)")
+                return description_text
+            else:
+                logger.warning("Description element found but not visible")
+                return ""
+
+        except NoSuchElementException:
+            logger.debug("No description found on page (element not present)")
+            return ""
+        except Exception as e:
+            logger.warning(f"Error extracting description: {e}")
+            return ""
+
     def test_single_listing(self, listing_url):
         """
         Test the bot on a single listing
