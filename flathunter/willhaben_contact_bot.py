@@ -318,8 +318,9 @@ class WillhabenContactBot:
         Robustly enforce that the Mietprofil (tenant profile) checkbox is checked.
         Waits for React components to fully load before interacting.
 
-        Stable mode adds: network idle wait, enhanced state detection, persistence verification,
-        viewport scrolling, randomized strategies, and retry logic with exponential backoff.
+        FAST mode: Simple state verification, single attempt, 4 click strategies.
+        STABLE mode: Network idle wait, 4-method state detection, persistence verification,
+                     viewport scrolling, randomized strategies, and 3 retries with exponential backoff.
 
         Args:
             max_wait_seconds: Maximum time to wait for checkbox to be ready (default 3.0s)
@@ -327,7 +328,7 @@ class WillhabenContactBot:
         Returns:
             True if checkbox is successfully checked, False otherwise
         """
-        mode = "STABLE" if self.mietprofil_stable_mode else "BASIC"
+        mode = "STABLE" if self.mietprofil_stable_mode else "FAST"
         logger.info(f"Enforcing Mietprofil checkbox [{mode} mode]...")
 
         max_retries = 3 if self.mietprofil_stable_mode else 1
@@ -415,7 +416,7 @@ class WillhabenContactBot:
                     is_checked = state['checked']
                     logger.debug(f"Initial state: {state['checked']} (confidence: {state['confidence']})")
                 else:
-                    # Basic mode: simple checks
+                    # FAST mode: simple checks
                     is_checked = checkbox_element.is_selected()
                     js_checked = self.driver.execute_script(
                         "return document.getElementById('shareTenantProfile')?.checked === true;"

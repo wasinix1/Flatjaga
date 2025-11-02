@@ -13,31 +13,24 @@ This feature implements a robust method to enforce that the "Mietprofil teilen" 
 
 ## The Solution
 
-### Enforcement Mode
+### Enforcement Modes: FAST vs STABLE
 
-When enabled, the bot will:
+When enforcement is enabled, you choose between two modes:
 
-1. **Wait for React to fully load** (up to 3 seconds)
-   - Checks for both the checkbox input element and the React wrapper component
-   - Verifies the component has stabilized before interacting
-   - Uses multiple indicators to ensure React hydration is complete
+**FAST Mode** (Default when enforcement enabled):
+- Simple 2-method state verification
+- Single attempt with 4 click strategies
+- Quick and efficient
+- Good for most use cases
 
-2. **Verify checkbox state**
-   - Checks using both `is_selected()` and JavaScript `checked` property
-   - Only takes action if the checkbox is not checked
-
-3. **Enforce checkbox is checked**
-   - Tries multiple strategies to check the checkbox:
-     - Direct click on input element
-     - JavaScript click
-     - Click on the styled wrapper div
-     - Click on the label element
-   - Verifies after each attempt that the checkbox was successfully checked
-
-4. **Comprehensive logging**
-   - Logs each step of the process
-   - Reports which strategy succeeded
-   - Warns if all strategies fail
+**STABLE Mode** (Maximum reliability):
+- 4-method state detection with confidence scoring
+- Network idle detection (waits for page fully loaded)
+- State persistence verification (checks state after 500ms)
+- Viewport scrolling with smooth animation
+- Randomized strategy order (stealth)
+- 3 retry attempts with exponential backoff
+- Variable human-like delays
 
 ## Configuration
 
@@ -67,44 +60,47 @@ willhaben_mietprofil_stable_mode: false
 - No active checking, relies on Willhaben's auto-check
 - Minimal interaction with the page
 
-**Mode 2: Basic Enforcement**
+**Mode 2: FAST Enforcement**
 ```yaml
 willhaben_enforce_mietprofil_sharing: true
 willhaben_mietprofil_stable_mode: false
 ```
 - Actively checks and enforces the checkbox
-- Simple state verification
+- 2-method state verification (is_selected + JS checked)
 - Single attempt with 4 click strategies
+- Quick and efficient
 - Good for most use cases
 
-**Mode 3: Stable Mode (Recommended for A/B Testing)**
+**Mode 3: STABLE Enforcement (Recommended for A/B Testing)**
 ```yaml
 willhaben_enforce_mietprofil_sharing: true
 willhaben_mietprofil_stable_mode: true
 ```
-- All basic mode features PLUS:
+- All FAST mode features PLUS:
 - Network idle detection (waits for page fully loaded)
-- Enhanced state detection (4 verification methods)
-- State persistence checking (verifies checkbox stays checked)
-- Viewport scrolling (ensures element visible)
+- Enhanced 4-method state detection with confidence scoring
+- State persistence checking (verifies checkbox stays checked after 500ms)
+- Viewport scrolling with smooth animation (ensures element visible)
 - Randomized strategy order (less predictable pattern)
 - Variable delays (more human-like timing)
-- 3 retry attempts with exponential backoff
+- 3 retry attempts with exponential backoff (0.5s, 1s, 2s)
 - Maximum reliability and stealth
 
 ### When to Enable Each Mode
 
-**Enable Basic Enforcement** if:
+**Enable FAST Mode** if:
 - You frequently see listings contacted without the Mietprofil being shared
 - You want good reliability without maximum overhead
 - You're experiencing the React loading timing issue occasionally
+- You want quick enforcement without extra verification
 
-**Enable Stable Mode** if:
-- Basic mode still has occasional failures
+**Enable STABLE Mode** if:
+- FAST mode still has occasional failures
 - You want maximum reliability and detection resistance
-- You're doing A/B testing between modes
+- You're doing A/B testing between FAST and STABLE modes
 - You value stealth and human-like behavior
-- You need state persistence verification
+- You need state persistence verification to protect against React re-renders
+- You want comprehensive confidence-scored state detection
 
 **Keep Disabled** (default) if:
 - The auto-check mechanism is working reliably for you
@@ -166,14 +162,14 @@ svg_visible             # Checkmark icon visibility
 - **Smooth scrolling**: Natural animation instead of instant jump
 
 **6. Retry Logic**
-- 3 total attempts (vs 1 in basic mode)
+- 3 total attempts (vs 1 in FAST mode)
 - Exponential backoff: 0.5s, 1s, 2s
 - Each retry uses fresh randomized strategy order
 - Comprehensive error logging
 
-### Technical Approach (Basic Mode)
+### Technical Approach (FAST Mode)
 
-The basic enforcement method uses this approach:
+The FAST enforcement method uses this approach:
 
 ```python
 # 1. Wait for checkbox and wrapper to be present and stable
@@ -231,16 +227,16 @@ The checkbox structure:
 INFO: Mietprofil checkbox should be auto-checked (logged-in users)
 ```
 
-**Basic Enforcement Mode:**
+**FAST Enforcement Mode:**
 ```
-INFO: Enforcing Mietprofil checkbox [BASIC mode]...
+INFO: Enforcing Mietprofil checkbox [FAST mode]...
 DEBUG: ✓ Checkbox stable (attempt 3)
 DEBUG: Initial state: False
 INFO: Mietprofil checkbox not checked - enforcing...
 INFO: ✓ Checkbox enforced via click label
 ```
 
-**Stable Mode:**
+**STABLE Mode:**
 ```
 INFO: Enforcing Mietprofil checkbox [STABLE mode]...
 DEBUG: Waiting for network idle...
@@ -253,7 +249,7 @@ DEBUG: ✓ State persistence verified: True
 INFO: ✓ Mietprofil checkbox already checked (verified)
 ```
 
-**Stable Mode with Retry:**
+**STABLE Mode with Retry:**
 ```
 INFO: Enforcing Mietprofil checkbox [STABLE mode]...
 DEBUG: ✓ Checkbox stable (attempt 4)

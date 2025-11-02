@@ -158,7 +158,7 @@ class WillhabenContactProcessor:
             delay_max = self.delay_max
 
         try:
-            mode_label = "STABLE" if self.mietprofil_stable_mode else "BASIC"
+            mode_label = "STABLE" if self.mietprofil_stable_mode else "FAST"
             logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s, enforce_mietprofil={self.enforce_mietprofil_sharing}, mode={mode_label})...")
             self.bot = WillhabenContactBot(
                 headless=headless_mode,
