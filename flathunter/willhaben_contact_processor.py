@@ -255,7 +255,33 @@ class WillhabenContactProcessor:
                 return False
 
             # Navigate to main page to validate session
-            temp_bot.driver.get('https://www.willhaben.at')
+            # Add retry logic for ChromeDriver "columnNumber" bug (intermittent issue in Chrome 141+)
+            max_retries = 3
+            navigation_success = False
+
+            for retry_attempt in range(max_retries):
+                try:
+                    temp_bot.driver.get('https://www.willhaben.at')
+                    navigation_success = True
+                    break  # Success - exit retry loop
+
+                except WebDriverException as e:
+                    error_str = str(e)
+                    # Check if it's the known ChromeDriver columnNumber bug
+                    if 'columnNumber' in error_str and retry_attempt < max_retries - 1:
+                        wait_time = 2 ** retry_attempt  # Exponential backoff: 1s, 2s, 4s
+                        logger.warning(
+                            f"ChromeDriver 'columnNumber' bug detected (attempt {retry_attempt+1}/{max_retries}) "
+                            f"- retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        # Different error or max retries reached - re-raise
+                        raise
+
+            if not navigation_success:
+                raise WebDriverException("Failed to navigate after retries")
+
             time.sleep(1)
 
             # Check if redirected to login (session expired)
