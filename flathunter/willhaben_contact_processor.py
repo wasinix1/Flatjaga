@@ -31,6 +31,7 @@ class WillhabenContactProcessor:
         self.delay_min = config.get('willhaben_delay_min', 0.5)
         self.delay_max = config.get('willhaben_delay_max', 2.0)
         self.enforce_mietprofil_sharing = config.get('willhaben_enforce_mietprofil_sharing', False)
+        self.mietprofil_stable_mode = config.get('willhaben_mietprofil_stable_mode', False)
 
         # Track headless mode for fallback
         self.headless_original = self.headless  # Remember original setting
@@ -157,12 +158,14 @@ class WillhabenContactProcessor:
             delay_max = self.delay_max
 
         try:
-            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s, enforce_mietprofil={self.enforce_mietprofil_sharing})...")
+            mode_label = "STABLE" if self.mietprofil_stable_mode else "BASIC"
+            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s, enforce_mietprofil={self.enforce_mietprofil_sharing}, mode={mode_label})...")
             self.bot = WillhabenContactBot(
                 headless=headless_mode,
                 delay_min=delay_min,
                 delay_max=delay_max,
-                enforce_mietprofil_sharing=self.enforce_mietprofil_sharing
+                enforce_mietprofil_sharing=self.enforce_mietprofil_sharing,
+                mietprofil_stable_mode=self.mietprofil_stable_mode
             )
             self.bot.start()
 
@@ -238,7 +241,8 @@ class WillhabenContactProcessor:
                 headless=False,
                 delay_min=self.delay_min,
                 delay_max=self.delay_max,
-                enforce_mietprofil_sharing=self.enforce_mietprofil_sharing
+                enforce_mietprofil_sharing=self.enforce_mietprofil_sharing,
+                mietprofil_stable_mode=self.mietprofil_stable_mode
             )
             temp_bot.start()
 

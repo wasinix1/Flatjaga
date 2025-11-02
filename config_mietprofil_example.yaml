@@ -12,3 +12,24 @@ willhaben_delay_max: 2.0
 # This uses a robust waiting mechanism for React components to load
 # Recommended if the checkbox is often failing to be checked automatically
 willhaben_enforce_mietprofil_sharing: false  # Change to true to enable
+
+# NEW: Enable stable mode for maximum reliability and stealth
+# Requires willhaben_enforce_mietprofil_sharing to be true
+# Adds: network idle wait, enhanced state detection, persistence verification,
+#       viewport scrolling, randomized strategies, and 3 retries with backoff
+# Recommended for A/B testing and maximum detection resistance
+willhaben_mietprofil_stable_mode: false  # Change to true for stable mode
+
+# ===== CONFIGURATION MODES =====
+#
+# Mode 1 - Disabled (Default):
+#   willhaben_enforce_mietprofil_sharing: false
+#   willhaben_mietprofil_stable_mode: false
+#
+# Mode 2 - Basic Enforcement:
+#   willhaben_enforce_mietprofil_sharing: true
+#   willhaben_mietprofil_stable_mode: false
+#
+# Mode 3 - Stable Mode (Recommended for A/B testing):
+#   willhaben_enforce_mietprofil_sharing: true
+#   willhaben_mietprofil_stable_mode: true

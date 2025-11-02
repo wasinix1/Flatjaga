@@ -26,7 +26,7 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, enforce_mietprofil_sharing=False):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, enforce_mietprofil_sharing=False, mietprofil_stable_mode=False):
         """
         Initialize the bot with Chrome WebDriver
         Initialize the bot with Stealth Chrome WebDriver
@@ -36,11 +36,13 @@ class WillhabenContactBot:
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
             enforce_mietprofil_sharing: Actively enforce Mietprofil checkbox is checked
+            mietprofil_stable_mode: Enable enhanced stealth and retry features for Mietprofil
         """
         self.options = webdriver.ChromeOptions()
         self.delay_min = delay_min
         self.delay_max = delay_max
         self.enforce_mietprofil_sharing = enforce_mietprofil_sharing
+        self.mietprofil_stable_mode = mietprofil_stable_mode
 
         if headless:
             self.options.add_argument('--headless')
@@ -116,10 +118,208 @@ class WillhabenContactBot:
         logger.warning(f"✗ All click strategies failed for {description}")
         return False
 
+    def _wait_for_network_idle(self, timeout=3.0, idle_time=0.5):
+        """
+        Wait for network activity to become idle (stable mode feature).
+        Uses performance API to detect when no new network requests are made.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+            idle_time: How long network must be idle to consider it stable
+
+        Returns:
+            True if network became idle, False if timeout
+        """
+        try:
+            start_time = time.time()
+            last_request_count = 0
+            stable_since = None
+
+            while time.time() - start_time < timeout:
+                # Get current network request count via Performance API
+                current_count = self.driver.execute_script(
+                    "return window.performance.getEntriesByType('resource').length;"
+                )
+
+                if current_count == last_request_count:
+                    # No new requests
+                    if stable_since is None:
+                        stable_since = time.time()
+                    elif time.time() - stable_since >= idle_time:
+                        logger.debug(f"✓ Network idle detected after {time.time() - start_time:.2f}s")
+                        return True
+                else:
+                    # New requests detected, reset stability timer
+                    stable_since = None
+                    last_request_count = current_count
+
+                time.sleep(0.1)
+
+            logger.debug(f"Network idle timeout after {timeout}s")
+            return False
+
+        except Exception as e:
+            logger.debug(f"Network idle check failed: {e}")
+            return False
+
+    def _get_comprehensive_checkbox_state(self, checkbox_element):
+        """
+        Get definitive checkbox state using multiple verification methods.
+
+        Args:
+            checkbox_element: The checkbox input element
+
+        Returns:
+            dict with state information and confidence level
+        """
+        state = {
+            'is_selected': False,
+            'js_checked': False,
+            'has_checked_class': False,
+            'svg_visible': False,
+            'confidence': 'low',
+            'checked': False
+        }
+
+        try:
+            # Method 1: Selenium is_selected()
+            state['is_selected'] = checkbox_element.is_selected()
+
+            # Method 2: JavaScript checked property
+            state['js_checked'] = self.driver.execute_script(
+                "return document.getElementById('shareTenantProfile')?.checked === true;"
+            )
+
+            # Method 3: Check CSS classes on styled wrapper (React visual state)
+            try:
+                wrapper = self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "div.Checkbox__StyledCheckbox-sc-7kkiwa-9, [data-testid='share-tenant-profile-checkbox'] ~ div"
+                )
+                wrapper_classes = wrapper.get_attribute('class') or ''
+                # Some React checkbox implementations add a 'checked' class or similar
+                state['has_checked_class'] = 'checked' in wrapper_classes.lower()
+            except:
+                pass
+
+            # Method 4: Check if checkmark SVG is visible
+            try:
+                checkmark_svg = self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "svg.Checkbox__CheckboxIcon-sc-7kkiwa-0, .Checkbox__CheckboxInputWrapper-sc-7kkiwa-8 svg"
+                )
+                state['svg_visible'] = checkmark_svg.is_displayed()
+            except:
+                pass
+
+            # Determine confidence and final state
+            checks = [state['is_selected'], state['js_checked'], state['svg_visible']]
+            true_count = sum(1 for c in checks if c)
+
+            if true_count >= 2:
+                state['confidence'] = 'high'
+                state['checked'] = True
+            elif true_count == 1:
+                state['confidence'] = 'medium'
+                state['checked'] = state['is_selected'] or state['js_checked']  # Trust these over SVG
+            else:
+                state['confidence'] = 'high'
+                state['checked'] = False
+
+            logger.debug(
+                f"State check: is_selected={state['is_selected']}, "
+                f"js_checked={state['js_checked']}, svg_visible={state['svg_visible']}, "
+                f"confidence={state['confidence']}, final={state['checked']}"
+            )
+
+            return state
+
+        except Exception as e:
+            logger.debug(f"Comprehensive state check error: {e}")
+            state['confidence'] = 'low'
+            return state
+
+    def _verify_checkbox_state_persistence(self, checkbox_element, expected_state, wait_time=0.5):
+        """
+        Verify that checkbox state persists after a delay (stable mode feature).
+        Protects against React re-renders that might uncheck the box.
+
+        Args:
+            checkbox_element: The checkbox input element
+            expected_state: Expected state (True for checked)
+            wait_time: How long to wait before re-checking
+
+        Returns:
+            True if state persisted, False if changed
+        """
+        try:
+            time.sleep(wait_time)
+            final_state = self._get_comprehensive_checkbox_state(checkbox_element)
+
+            if final_state['checked'] == expected_state:
+                logger.debug(f"✓ State persistence verified: {expected_state}")
+                return True
+            else:
+                logger.warning(f"✗ State changed! Expected {expected_state}, got {final_state['checked']}")
+                return False
+
+        except Exception as e:
+            logger.debug(f"State persistence check error: {e}")
+            return False
+
+    def _ensure_element_in_viewport(self, element, description="element"):
+        """
+        Ensure element is in viewport before interacting (stable mode feature).
+        Scrolls smoothly if needed to appear more human-like.
+
+        Args:
+            element: Selenium WebElement
+            description: Description for logging
+
+        Returns:
+            True if element is/became visible in viewport
+        """
+        try:
+            # Check if element is already in viewport
+            in_viewport = self.driver.execute_script(
+                """
+                var elem = arguments[0];
+                var rect = elem.getBoundingClientRect();
+                return (
+                    rect.top >= 0 &&
+                    rect.left >= 0 &&
+                    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+                );
+                """,
+                element
+            )
+
+            if in_viewport:
+                logger.debug(f"✓ {description} already in viewport")
+                return True
+
+            # Scroll element into view with smooth behavior (more human-like)
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                element
+            )
+            time.sleep(random.uniform(0.3, 0.5))  # Wait for smooth scroll
+
+            logger.debug(f"✓ Scrolled {description} into viewport")
+            return True
+
+        except Exception as e:
+            logger.debug(f"Viewport check/scroll error for {description}: {e}")
+            return False
+
     def _enforce_mietprofil_checkbox(self, max_wait_seconds=3.0):
         """
         Robustly enforce that the Mietprofil (tenant profile) checkbox is checked.
         Waits for React components to fully load before interacting.
+
+        Stable mode adds: network idle wait, enhanced state detection, persistence verification,
+        viewport scrolling, randomized strategies, and retry logic with exponential backoff.
 
         Args:
             max_wait_seconds: Maximum time to wait for checkbox to be ready (default 3.0s)
@@ -127,114 +327,190 @@ class WillhabenContactBot:
         Returns:
             True if checkbox is successfully checked, False otherwise
         """
-        logger.info("Enforcing Mietprofil checkbox (waiting for React to load)...")
+        mode = "STABLE" if self.mietprofil_stable_mode else "BASIC"
+        logger.info(f"Enforcing Mietprofil checkbox [{mode} mode]...")
 
-        try:
-            # Strategy: Wait for the checkbox to be present AND the React component to be stable
-            # We'll check multiple indicators to ensure React has finished hydrating
+        max_retries = 3 if self.mietprofil_stable_mode else 1
+        base_backoff = 0.5
 
-            max_attempts = int(max_wait_seconds / 0.2)  # Check every 200ms
-            checkbox_element = None
-            checkbox_stable = False
+        for retry_attempt in range(max_retries):
+            try:
+                if retry_attempt > 0:
+                    backoff_time = base_backoff * (2 ** (retry_attempt - 1))
+                    logger.info(f"Retry attempt {retry_attempt + 1}/{max_retries} (backoff: {backoff_time}s)")
+                    time.sleep(backoff_time)
 
-            for attempt in range(max_attempts):
-                try:
-                    # Try to find the checkbox
-                    checkbox_element = self.driver.find_element(By.ID, "shareTenantProfile")
+                # STABLE MODE: Wait for network idle before proceeding
+                if self.mietprofil_stable_mode:
+                    logger.debug("Waiting for network idle...")
+                    self._wait_for_network_idle(timeout=2.0, idle_time=0.5)
 
-                    # Check if the checkbox wrapper has stabilized (React has finished rendering)
-                    # We look for the parent div with the checkbox classes
+                # Wait for checkbox element to be present with variable delays (stealth)
+                checkbox_element = None
+                checkbox_stable = False
+
+                # Use data-testid as primary selector (more stable than dynamic classes)
+                selectors = [
+                    (By.CSS_SELECTOR, "[data-testid='share-tenant-profile-checkbox']"),
+                    (By.ID, "shareTenantProfile"),
+                ]
+
+                check_delay = 0.2
+                max_attempts = int(max_wait_seconds / check_delay)
+
+                for attempt in range(max_attempts):
+                    # Variable delays in stable mode (more human-like)
+                    if self.mietprofil_stable_mode and attempt > 0:
+                        check_delay = random.uniform(0.15, 0.25)
+
                     try:
-                        checkbox_wrapper = self.driver.find_element(
-                            By.CSS_SELECTOR,
-                            "div.Checkbox__StyledCheckbox-sc-7kkiwa-9"
-                        )
+                        # Try multiple selectors
+                        for selector_type, selector_value in selectors:
+                            try:
+                                checkbox_element = self.driver.find_element(selector_type, selector_value)
+                                if checkbox_element:
+                                    break
+                            except NoSuchElementException:
+                                continue
 
-                        # If we can find both the input and the styled wrapper, React is likely ready
-                        if checkbox_wrapper and checkbox_element:
-                            checkbox_stable = True
-                            logger.debug(f"✓ Checkbox found and stable (attempt {attempt + 1})")
-                            break
+                        if not checkbox_element:
+                            time.sleep(check_delay)
+                            continue
+
+                        # Verify wrapper exists (React hydration complete)
+                        try:
+                            wrapper = self.driver.find_element(
+                                By.CSS_SELECTOR,
+                                "div.Checkbox__StyledCheckbox-sc-7kkiwa-9, [data-testid='share-tenant-profile-checkbox'] ~ div"
+                            )
+                            if wrapper and checkbox_element:
+                                checkbox_stable = True
+                                logger.debug(f"✓ Checkbox stable (attempt {attempt + 1})")
+                                break
+                        except NoSuchElementException:
+                            pass
 
                     except NoSuchElementException:
-                        # Wrapper not ready yet
                         pass
 
-                except NoSuchElementException:
-                    # Checkbox not found yet
-                    pass
+                    time.sleep(check_delay)
 
-                # Small delay before next check
-                time.sleep(0.2)
+                if not checkbox_stable or not checkbox_element:
+                    logger.warning(f"Mietprofil checkbox not stable after {max_wait_seconds}s")
+                    if retry_attempt < max_retries - 1:
+                        continue
+                    return False
 
-            if not checkbox_stable or not checkbox_element:
-                logger.warning(f"Mietprofil checkbox not stable after {max_wait_seconds}s")
+                # Additional delay for React event handlers
+                handler_delay = random.uniform(0.25, 0.35) if self.mietprofil_stable_mode else 0.3
+                time.sleep(handler_delay)
+
+                # STABLE MODE: Ensure element in viewport
+                if self.mietprofil_stable_mode:
+                    self._ensure_element_in_viewport(checkbox_element, "Mietprofil checkbox")
+
+                # Check current state with comprehensive detection
+                if self.mietprofil_stable_mode:
+                    state = self._get_comprehensive_checkbox_state(checkbox_element)
+                    is_checked = state['checked']
+                    logger.debug(f"Initial state: {state['checked']} (confidence: {state['confidence']})")
+                else:
+                    # Basic mode: simple checks
+                    is_checked = checkbox_element.is_selected()
+                    js_checked = self.driver.execute_script(
+                        "return document.getElementById('shareTenantProfile')?.checked === true;"
+                    )
+                    is_checked = is_checked or js_checked
+                    logger.debug(f"Initial state: {is_checked}")
+
+                if is_checked:
+                    # STABLE MODE: Verify persistence
+                    if self.mietprofil_stable_mode:
+                        if self._verify_checkbox_state_persistence(checkbox_element, True, wait_time=0.5):
+                            logger.info("✓ Mietprofil checkbox already checked (verified)")
+                            return True
+                        else:
+                            logger.warning("State unstable, forcing re-check...")
+                    else:
+                        logger.info("✓ Mietprofil checkbox already checked")
+                        return True
+
+                # Checkbox not checked - enforce it
+                logger.info("Mietprofil checkbox not checked - enforcing...")
+
+                # Define click strategies (label first for stealth)
+                strategies = [
+                    ("click label", lambda: self.driver.find_element(
+                        By.CSS_SELECTOR,
+                        "label.Checkbox__CheckboxLabel-sc-7kkiwa-7, [for='shareTenantProfile']"
+                    ).click()),
+                    ("click input element", lambda: checkbox_element.click()),
+                    ("click styled wrapper", lambda: self.driver.find_element(
+                        By.CSS_SELECTOR,
+                        "div.Checkbox__StyledCheckbox-sc-7kkiwa-9"
+                    ).click()),
+                    ("click via JavaScript", lambda: self.driver.execute_script(
+                        "document.getElementById('shareTenantProfile')?.click();"
+                    )),
+                ]
+
+                # STABLE MODE: Randomize strategy order (less predictable)
+                if self.mietprofil_stable_mode:
+                    random.shuffle(strategies)
+
+                for strategy_name, strategy_func in strategies:
+                    try:
+                        strategy_func()
+
+                        # Variable wait for React update
+                        react_delay = random.uniform(0.2, 0.3) if self.mietprofil_stable_mode else 0.2
+                        time.sleep(react_delay)
+
+                        # Verify it's now checked
+                        if self.mietprofil_stable_mode:
+                            state_after = self._get_comprehensive_checkbox_state(checkbox_element)
+                            success = state_after['checked']
+                        else:
+                            is_checked_after = checkbox_element.is_selected()
+                            js_checked_after = self.driver.execute_script(
+                                "return document.getElementById('shareTenantProfile')?.checked === true;"
+                            )
+                            success = is_checked_after or js_checked_after
+
+                        if success:
+                            # STABLE MODE: Verify persistence
+                            if self.mietprofil_stable_mode:
+                                if self._verify_checkbox_state_persistence(checkbox_element, True, wait_time=0.5):
+                                    logger.info(f"✓ Checkbox enforced via {strategy_name} (verified)")
+                                    return True
+                                else:
+                                    logger.warning(f"{strategy_name} succeeded but state didn't persist")
+                                    continue
+                            else:
+                                logger.info(f"✓ Checkbox enforced via {strategy_name}")
+                                return True
+                        else:
+                            logger.debug(f"  {strategy_name} clicked but not checked")
+
+                    except Exception as e:
+                        logger.debug(f"  {strategy_name} failed: {e}")
+                        continue
+
+                # All strategies failed this attempt
+                if retry_attempt < max_retries - 1:
+                    logger.warning(f"All strategies failed, will retry ({retry_attempt + 1}/{max_retries})...")
+                    continue
+                else:
+                    logger.warning("✗ Failed to enforce Mietprofil checkbox after all retries")
+                    return False
+
+            except Exception as e:
+                logger.error(f"Error in enforcement attempt {retry_attempt + 1}: {e}")
+                if retry_attempt < max_retries - 1:
+                    continue
                 return False
 
-            # Additional small delay to ensure React event handlers are attached
-            time.sleep(0.3)
-
-            # Now check the current state of the checkbox
-            is_checked = checkbox_element.is_selected()
-
-            # Also check via JavaScript for more reliability
-            js_checked = self.driver.execute_script(
-                "return document.getElementById('shareTenantProfile').checked;"
-            )
-
-            logger.debug(f"Checkbox state: is_selected()={is_checked}, JS checked={js_checked}")
-
-            if is_checked or js_checked:
-                logger.info("✓ Mietprofil checkbox already checked")
-                return True
-
-            # Checkbox is not checked - we need to check it
-            logger.info("Mietprofil checkbox not checked - enforcing...")
-
-            # Try multiple strategies to check the checkbox
-            strategies = [
-                ("click input element", lambda: checkbox_element.click()),
-                ("click via JavaScript", lambda: self.driver.execute_script(
-                    "document.getElementById('shareTenantProfile').click();"
-                )),
-                ("click styled wrapper", lambda: self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "div.Checkbox__StyledCheckbox-sc-7kkiwa-9"
-                ).click()),
-                ("click label", lambda: self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "label.Checkbox__CheckboxLabel-sc-7kkiwa-7"
-                ).click()),
-            ]
-
-            for strategy_name, strategy_func in strategies:
-                try:
-                    strategy_func()
-                    time.sleep(0.2)  # Wait for React to update
-
-                    # Verify it's now checked
-                    is_checked_after = checkbox_element.is_selected()
-                    js_checked_after = self.driver.execute_script(
-                        "return document.getElementById('shareTenantProfile').checked;"
-                    )
-
-                    if is_checked_after or js_checked_after:
-                        logger.info(f"✓ Mietprofil checkbox checked successfully using {strategy_name}")
-                        return True
-                    else:
-                        logger.debug(f"  {strategy_name} clicked but checkbox not checked")
-
-                except Exception as e:
-                    logger.debug(f"  {strategy_name} failed: {e}")
-                    continue
-
-            # If we got here, all strategies failed
-            logger.warning("✗ Failed to check Mietprofil checkbox with all strategies")
-            return False
-
-        except Exception as e:
-            logger.error(f"Error enforcing Mietprofil checkbox: {e}")
-            return False
+        return False
 
     def _handle_popups(self):
         """Handle any popups that might appear (cookies, privacy, security).

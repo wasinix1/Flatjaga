@@ -41,7 +41,7 @@ When enabled, the bot will:
 
 ## Configuration
 
-Add this line to your `config.yaml` under the Willhaben section:
+Add these lines to your `config.yaml` under the Willhaben section:
 
 ```yaml
 # Willhaben auto-contact configuration
@@ -52,37 +52,128 @@ willhaben_delay_max: 2.0
 
 # Enforce Mietprofil sharing checkbox is checked (recommended if checkbox often fails)
 willhaben_enforce_mietprofil_sharing: false  # Set to true to enable enforcement mode
+
+# Enable stable mode for maximum reliability and stealth (requires enforcement enabled)
+willhaben_mietprofil_stable_mode: false  # Set to true for enhanced features
 ```
 
-### When to Enable
+### Configuration Modes
 
-Enable this mode (`willhaben_enforce_mietprofil_sharing: true`) if:
+**Mode 1: Disabled (Default)**
+```yaml
+willhaben_enforce_mietprofil_sharing: false
+willhaben_mietprofil_stable_mode: false
+```
+- No active checking, relies on Willhaben's auto-check
+- Minimal interaction with the page
 
+**Mode 2: Basic Enforcement**
+```yaml
+willhaben_enforce_mietprofil_sharing: true
+willhaben_mietprofil_stable_mode: false
+```
+- Actively checks and enforces the checkbox
+- Simple state verification
+- Single attempt with 4 click strategies
+- Good for most use cases
+
+**Mode 3: Stable Mode (Recommended for A/B Testing)**
+```yaml
+willhaben_enforce_mietprofil_sharing: true
+willhaben_mietprofil_stable_mode: true
+```
+- All basic mode features PLUS:
+- Network idle detection (waits for page fully loaded)
+- Enhanced state detection (4 verification methods)
+- State persistence checking (verifies checkbox stays checked)
+- Viewport scrolling (ensures element visible)
+- Randomized strategy order (less predictable pattern)
+- Variable delays (more human-like timing)
+- 3 retry attempts with exponential backoff
+- Maximum reliability and stealth
+
+### When to Enable Each Mode
+
+**Enable Basic Enforcement** if:
 - You frequently see listings contacted without the Mietprofil being shared
-- You want to ensure 100% reliability for the checkbox
-- You're experiencing the React loading timing issue
+- You want good reliability without maximum overhead
+- You're experiencing the React loading timing issue occasionally
 
-Keep it disabled (default) if:
+**Enable Stable Mode** if:
+- Basic mode still has occasional failures
+- You want maximum reliability and detection resistance
+- You're doing A/B testing between modes
+- You value stealth and human-like behavior
+- You need state persistence verification
 
+**Keep Disabled** (default) if:
 - The auto-check mechanism is working reliably for you
-- You want to minimize interaction with the page to avoid detection
+- You want absolute minimum page interaction
+- You've verified checkbox is consistently working
 
 ## Implementation Details
 
 ### Code Changes
 
 1. **`flathunter/willhaben_contact_bot.py`**
-   - Added `enforce_mietprofil_sharing` parameter to `__init__`
-   - Added `_enforce_mietprofil_checkbox()` method with robust waiting logic
-   - Updated email form handling to call enforcement method when enabled
+   - Added `enforce_mietprofil_sharing` and `mietprofil_stable_mode` parameters to `__init__`
+   - Added helper methods:
+     - `_wait_for_network_idle()`: Detects when network requests complete
+     - `_get_comprehensive_checkbox_state()`: 4-method state verification
+     - `_verify_checkbox_state_persistence()`: Checks state doesn't change after 500ms
+     - `_ensure_element_in_viewport()`: Smooth scrolling into view
+   - Rewrote `_enforce_mietprofil_checkbox()` with stable mode logic
+   - Updated email form handling to call enforcement when enabled
 
 2. **`flathunter/willhaben_contact_processor.py`**
-   - Added config reading for `willhaben_enforce_mietprofil_sharing`
-   - Passes the setting to all bot instances
+   - Added config reading for both enforcement and stable mode settings
+   - Passes both settings to all bot instances
 
-### Technical Approach
+### Stable Mode Features Explained
 
-The enforcement method uses a multi-layered approach:
+**1. Network Idle Detection**
+- Monitors `window.performance.getEntriesByType('resource')`
+- Waits until no new network requests for 0.5 seconds
+- Ensures page is fully loaded before interacting
+- Timeout: 2 seconds max
+
+**2. Enhanced State Detection (4 Methods)**
+```python
+is_selected()           # Selenium native check
+js_checked              # JavaScript checked property
+has_checked_class       # React wrapper CSS classes
+svg_visible             # Checkmark icon visibility
+```
+- Uses majority vote (2/3 agreement = high confidence)
+- Trusts `is_selected()` and `js_checked` over visual indicators
+
+**3. State Persistence Verification**
+- After clicking, waits 500ms
+- Re-checks state with all 4 methods
+- Protects against React re-renders unchecking the box
+- Retries if state doesn't persist
+
+**4. Viewport Scrolling**
+- Checks if element is in viewport before clicking
+- Smooth scroll if needed (`behavior: 'smooth'`)
+- More human-like than instant scrolling
+- Centers element in viewport
+
+**5. Stealth Features**
+- **Randomized strategy order**: Different click sequence each time
+- **Variable delays**: 0.15-0.25s instead of fixed 0.2s
+- **Label-first clicking**: Most human-like interaction
+- **Smooth scrolling**: Natural animation instead of instant jump
+
+**6. Retry Logic**
+- 3 total attempts (vs 1 in basic mode)
+- Exponential backoff: 0.5s, 1s, 2s
+- Each retry uses fresh randomized strategy order
+- Comprehensive error logging
+
+### Technical Approach (Basic Mode)
+
+The basic enforcement method uses this approach:
 
 ```python
 # 1. Wait for checkbox and wrapper to be present and stable
@@ -135,20 +226,42 @@ The checkbox structure:
 
 ## Logging
 
-When enforcement mode is enabled, you'll see logs like:
-
-```
-INFO: Enforcing Mietprofil checkbox (waiting for React to load)...
-DEBUG: ✓ Checkbox found and stable (attempt 3)
-DEBUG: Checkbox state: is_selected()=False, JS checked=False
-INFO: Mietprofil checkbox not checked - enforcing...
-INFO: ✓ Mietprofil checkbox checked successfully using click via JavaScript
-```
-
-If disabled (default):
-
+**Disabled Mode (Default):**
 ```
 INFO: Mietprofil checkbox should be auto-checked (logged-in users)
+```
+
+**Basic Enforcement Mode:**
+```
+INFO: Enforcing Mietprofil checkbox [BASIC mode]...
+DEBUG: ✓ Checkbox stable (attempt 3)
+DEBUG: Initial state: False
+INFO: Mietprofil checkbox not checked - enforcing...
+INFO: ✓ Checkbox enforced via click label
+```
+
+**Stable Mode:**
+```
+INFO: Enforcing Mietprofil checkbox [STABLE mode]...
+DEBUG: Waiting for network idle...
+DEBUG: ✓ Network idle detected after 0.87s
+DEBUG: ✓ Checkbox stable (attempt 2)
+DEBUG: ✓ Mietprofil checkbox already in viewport
+DEBUG: State check: is_selected=True, js_checked=True, svg_visible=True, confidence=high, final=True
+DEBUG: Initial state: True (confidence: high)
+DEBUG: ✓ State persistence verified: True
+INFO: ✓ Mietprofil checkbox already checked (verified)
+```
+
+**Stable Mode with Retry:**
+```
+INFO: Enforcing Mietprofil checkbox [STABLE mode]...
+DEBUG: ✓ Checkbox stable (attempt 4)
+DEBUG: Initial state: False (confidence: high)
+INFO: Mietprofil checkbox not checked - enforcing...
+DEBUG:   click styled wrapper clicked but not checked
+DEBUG:   click via JavaScript failed: ...
+INFO: ✓ Checkbox enforced via click label (verified)
 ```
 
 ## Testing
