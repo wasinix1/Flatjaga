@@ -26,7 +26,7 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, enforce_mietprofil_sharing=False, mietprofil_stable_mode=False):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, mietprofil_mode="disabled"):
         """
         Initialize the bot with Chrome WebDriver
         Initialize the bot with Stealth Chrome WebDriver
@@ -35,14 +35,12 @@ class WillhabenContactBot:
             headless: Run Chrome in headless mode (no visible browser)
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
-            enforce_mietprofil_sharing: Actively enforce Mietprofil checkbox is checked
-            mietprofil_stable_mode: Enable enhanced stealth and retry features for Mietprofil
+            mietprofil_mode: Mietprofil enforcement mode ("disabled", "fast", or "stable")
         """
         self.options = webdriver.ChromeOptions()
         self.delay_min = delay_min
         self.delay_max = delay_max
-        self.enforce_mietprofil_sharing = enforce_mietprofil_sharing
-        self.mietprofil_stable_mode = mietprofil_stable_mode
+        self.mietprofil_mode = mietprofil_mode.lower() if mietprofil_mode else "disabled"
 
         if headless:
             self.options.add_argument('--headless')
@@ -328,10 +326,10 @@ class WillhabenContactBot:
         Returns:
             True if checkbox is successfully checked, False otherwise
         """
-        mode = "STABLE" if self.mietprofil_stable_mode else "FAST"
-        logger.info(f"Enforcing Mietprofil checkbox [{mode} mode]...")
+        is_stable = self.mietprofil_mode == "stable"
+        logger.info(f"Mietprofil enforcement: {self.mietprofil_mode.upper()} mode")
 
-        max_retries = 3 if self.mietprofil_stable_mode else 1
+        max_retries = 3 if is_stable else 1
         base_backoff = 0.5
 
         for retry_attempt in range(max_retries):
@@ -342,7 +340,7 @@ class WillhabenContactBot:
                     time.sleep(backoff_time)
 
                 # STABLE MODE: Wait for network idle before proceeding
-                if self.mietprofil_stable_mode:
+                if is_stable:
                     logger.debug("Waiting for network idle...")
                     self._wait_for_network_idle(timeout=2.0, idle_time=0.5)
 
@@ -361,7 +359,7 @@ class WillhabenContactBot:
 
                 for attempt in range(max_attempts):
                     # Variable delays in stable mode (more human-like)
-                    if self.mietprofil_stable_mode and attempt > 0:
+                    if is_stable and attempt > 0:
                         check_delay = random.uniform(0.15, 0.25)
 
                     try:
@@ -403,15 +401,15 @@ class WillhabenContactBot:
                     return False
 
                 # Additional delay for React event handlers
-                handler_delay = random.uniform(0.25, 0.35) if self.mietprofil_stable_mode else 0.3
+                handler_delay = random.uniform(0.25, 0.35) if is_stable else 0.3
                 time.sleep(handler_delay)
 
                 # STABLE MODE: Ensure element in viewport
-                if self.mietprofil_stable_mode:
+                if is_stable:
                     self._ensure_element_in_viewport(checkbox_element, "Mietprofil checkbox")
 
                 # Check current state with comprehensive detection
-                if self.mietprofil_stable_mode:
+                if is_stable:
                     state = self._get_comprehensive_checkbox_state(checkbox_element)
                     is_checked = state['checked']
                     logger.debug(f"Initial state: {state['checked']} (confidence: {state['confidence']})")
@@ -426,7 +424,7 @@ class WillhabenContactBot:
 
                 if is_checked:
                     # STABLE MODE: Verify persistence
-                    if self.mietprofil_stable_mode:
+                    if is_stable:
                         if self._verify_checkbox_state_persistence(checkbox_element, True, wait_time=0.5):
                             logger.info("✓ Mietprofil checkbox already checked (verified)")
                             return True
@@ -456,7 +454,7 @@ class WillhabenContactBot:
                 ]
 
                 # STABLE MODE: Randomize strategy order (less predictable)
-                if self.mietprofil_stable_mode:
+                if is_stable:
                     random.shuffle(strategies)
 
                 for strategy_name, strategy_func in strategies:
@@ -464,11 +462,11 @@ class WillhabenContactBot:
                         strategy_func()
 
                         # Variable wait for React update
-                        react_delay = random.uniform(0.2, 0.3) if self.mietprofil_stable_mode else 0.2
+                        react_delay = random.uniform(0.2, 0.3) if is_stable else 0.2
                         time.sleep(react_delay)
 
                         # Verify it's now checked
-                        if self.mietprofil_stable_mode:
+                        if is_stable:
                             state_after = self._get_comprehensive_checkbox_state(checkbox_element)
                             success = state_after['checked']
                         else:
@@ -480,7 +478,7 @@ class WillhabenContactBot:
 
                         if success:
                             # STABLE MODE: Verify persistence
-                            if self.mietprofil_stable_mode:
+                            if is_stable:
                                 if self._verify_checkbox_state_persistence(checkbox_element, True, wait_time=0.5):
                                     logger.info(f"✓ Checkbox enforced via {strategy_name} (verified)")
                                     return True
@@ -776,14 +774,12 @@ class WillhabenContactBot:
                         logger.debug(f"Viewing checkbox not found or not available: {e}")
 
                     # Mietprofil checkbox handling
-                    if self.enforce_mietprofil_sharing:
-                        # Enforce mode: Actively ensure checkbox is checked
+                    if self.mietprofil_mode != "disabled":
                         self._enforce_mietprofil_checkbox()
                         self._random_delay(0.1, 0.2)
                     else:
-                        # Default mode: Should be auto-checked for logged-in users
-                        # We don't interact with it to avoid race conditions with React hydration
-                        logger.info("Mietprofil checkbox should be auto-checked (logged-in users)")
+                        # Disabled: Should be auto-checked for logged-in users
+                        logger.info("Mietprofil: auto-check (no enforcement)")
 
                     # Find submit button
                     try:

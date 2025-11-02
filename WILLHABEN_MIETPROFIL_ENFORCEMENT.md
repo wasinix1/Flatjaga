@@ -34,7 +34,7 @@ When enforcement is enabled, you choose between two modes:
 
 ## Configuration
 
-Add these lines to your `config.yaml` under the Willhaben section:
+Add this line to your `config.yaml`:
 
 ```yaml
 # Willhaben auto-contact configuration
@@ -43,27 +43,22 @@ willhaben_headless: true
 willhaben_delay_min: 0.5
 willhaben_delay_max: 2.0
 
-# Enforce Mietprofil sharing checkbox is checked (recommended if checkbox often fails)
-willhaben_enforce_mietprofil_sharing: false  # Set to true to enable enforcement mode
-
-# Enable stable mode for maximum reliability and stealth (requires enforcement enabled)
-willhaben_mietprofil_stable_mode: false  # Set to true for enhanced features
+# Mietprofil enforcement mode: "disabled", "fast", or "stable"
+willhaben_mietprofil_mode: disabled
 ```
 
 ### Configuration Modes
 
-**Mode 1: Disabled (Default)**
+**disabled** (Default)
 ```yaml
-willhaben_enforce_mietprofil_sharing: false
-willhaben_mietprofil_stable_mode: false
+willhaben_mietprofil_mode: disabled
 ```
 - No active checking, relies on Willhaben's auto-check
 - Minimal interaction with the page
 
-**Mode 2: FAST Enforcement**
+**fast**
 ```yaml
-willhaben_enforce_mietprofil_sharing: true
-willhaben_mietprofil_stable_mode: false
+willhaben_mietprofil_mode: fast
 ```
 - Actively checks and enforces the checkbox
 - 2-method state verification (is_selected + JS checked)
@@ -71,10 +66,9 @@ willhaben_mietprofil_stable_mode: false
 - Quick and efficient
 - Good for most use cases
 
-**Mode 3: STABLE Enforcement (Recommended for A/B Testing)**
+**stable** (Recommended for A/B Testing)
 ```yaml
-willhaben_enforce_mietprofil_sharing: true
-willhaben_mietprofil_stable_mode: true
+willhaben_mietprofil_mode: stable
 ```
 - All FAST mode features PLUS:
 - Network idle detection (waits for page fully loaded)
@@ -112,18 +106,18 @@ willhaben_mietprofil_stable_mode: true
 ### Code Changes
 
 1. **`flathunter/willhaben_contact_bot.py`**
-   - Added `enforce_mietprofil_sharing` and `mietprofil_stable_mode` parameters to `__init__`
+   - Added `mietprofil_mode` parameter to `__init__` ("disabled", "fast", or "stable")
    - Added helper methods:
      - `_wait_for_network_idle()`: Detects when network requests complete
      - `_get_comprehensive_checkbox_state()`: 4-method state verification
      - `_verify_checkbox_state_persistence()`: Checks state doesn't change after 500ms
      - `_ensure_element_in_viewport()`: Smooth scrolling into view
-   - Rewrote `_enforce_mietprofil_checkbox()` with stable mode logic
-   - Updated email form handling to call enforcement when enabled
+   - Rewrote `_enforce_mietprofil_checkbox()` with fast/stable mode logic
+   - Updated email form handling to call enforcement when mode != "disabled"
 
 2. **`flathunter/willhaben_contact_processor.py`**
-   - Added config reading for both enforcement and stable mode settings
-   - Passes both settings to all bot instances
+   - Added config reading for `willhaben_mietprofil_mode`
+   - Passes mode setting to all bot instances
 
 ### Stable Mode Features Explained
 
@@ -222,23 +216,22 @@ The checkbox structure:
 
 ## Logging
 
-**Disabled Mode (Default):**
+**disabled mode:**
 ```
-INFO: Mietprofil checkbox should be auto-checked (logged-in users)
+INFO: Mietprofil: auto-check (no enforcement)
 ```
 
-**FAST Enforcement Mode:**
+**fast mode:**
 ```
-INFO: Enforcing Mietprofil checkbox [FAST mode]...
+INFO: Mietprofil enforcement: FAST mode
 DEBUG: ✓ Checkbox stable (attempt 3)
 DEBUG: Initial state: False
-INFO: Mietprofil checkbox not checked - enforcing...
 INFO: ✓ Checkbox enforced via click label
 ```
 
-**STABLE Mode:**
+**stable mode:**
 ```
-INFO: Enforcing Mietprofil checkbox [STABLE mode]...
+INFO: Mietprofil enforcement: STABLE mode
 DEBUG: Waiting for network idle...
 DEBUG: ✓ Network idle detected after 0.87s
 DEBUG: ✓ Checkbox stable (attempt 2)
@@ -249,12 +242,11 @@ DEBUG: ✓ State persistence verified: True
 INFO: ✓ Mietprofil checkbox already checked (verified)
 ```
 
-**STABLE Mode with Retry:**
+**stable mode with retry:**
 ```
-INFO: Enforcing Mietprofil checkbox [STABLE mode]...
+INFO: Mietprofil enforcement: STABLE mode
 DEBUG: ✓ Checkbox stable (attempt 4)
 DEBUG: Initial state: False (confidence: high)
-INFO: Mietprofil checkbox not checked - enforcing...
 DEBUG:   click styled wrapper clicked but not checked
 DEBUG:   click via JavaScript failed: ...
 INFO: ✓ Checkbox enforced via click label (verified)
