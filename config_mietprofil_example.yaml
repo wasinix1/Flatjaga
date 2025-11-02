@@ -1,0 +1,14 @@
+# Example config snippet for Willhaben Mietprofil enforcement
+# Add this to your config.yaml under the Willhaben section
+
+# Willhaben auto-contact configuration
+willhaben_auto_contact: true
+willhaben_headless: true
+willhaben_delay_min: 0.5
+willhaben_delay_max: 2.0
+
+# NEW: Enforce Mietprofil sharing checkbox is checked
+# Set to true to actively ensure the "Mietprofil teilen" checkbox is checked
+# This uses a robust waiting mechanism for React components to load
+# Recommended if the checkbox is often failing to be checked automatically
+willhaben_enforce_mietprofil_sharing: false  # Change to true to enable

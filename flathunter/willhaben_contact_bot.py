@@ -26,7 +26,7 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, enforce_mietprofil_sharing=False):
         """
         Initialize the bot with Chrome WebDriver
         Initialize the bot with Stealth Chrome WebDriver
@@ -35,10 +35,12 @@ class WillhabenContactBot:
             headless: Run Chrome in headless mode (no visible browser)
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
+            enforce_mietprofil_sharing: Actively enforce Mietprofil checkbox is checked
         """
         self.options = webdriver.ChromeOptions()
         self.delay_min = delay_min
         self.delay_max = delay_max
+        self.enforce_mietprofil_sharing = enforce_mietprofil_sharing
 
         if headless:
             self.options.add_argument('--headless')
@@ -113,6 +115,126 @@ class WillhabenContactBot:
 
         logger.warning(f"✗ All click strategies failed for {description}")
         return False
+
+    def _enforce_mietprofil_checkbox(self, max_wait_seconds=3.0):
+        """
+        Robustly enforce that the Mietprofil (tenant profile) checkbox is checked.
+        Waits for React components to fully load before interacting.
+
+        Args:
+            max_wait_seconds: Maximum time to wait for checkbox to be ready (default 3.0s)
+
+        Returns:
+            True if checkbox is successfully checked, False otherwise
+        """
+        logger.info("Enforcing Mietprofil checkbox (waiting for React to load)...")
+
+        try:
+            # Strategy: Wait for the checkbox to be present AND the React component to be stable
+            # We'll check multiple indicators to ensure React has finished hydrating
+
+            max_attempts = int(max_wait_seconds / 0.2)  # Check every 200ms
+            checkbox_element = None
+            checkbox_stable = False
+
+            for attempt in range(max_attempts):
+                try:
+                    # Try to find the checkbox
+                    checkbox_element = self.driver.find_element(By.ID, "shareTenantProfile")
+
+                    # Check if the checkbox wrapper has stabilized (React has finished rendering)
+                    # We look for the parent div with the checkbox classes
+                    try:
+                        checkbox_wrapper = self.driver.find_element(
+                            By.CSS_SELECTOR,
+                            "div.Checkbox__StyledCheckbox-sc-7kkiwa-9"
+                        )
+
+                        # If we can find both the input and the styled wrapper, React is likely ready
+                        if checkbox_wrapper and checkbox_element:
+                            checkbox_stable = True
+                            logger.debug(f"✓ Checkbox found and stable (attempt {attempt + 1})")
+                            break
+
+                    except NoSuchElementException:
+                        # Wrapper not ready yet
+                        pass
+
+                except NoSuchElementException:
+                    # Checkbox not found yet
+                    pass
+
+                # Small delay before next check
+                time.sleep(0.2)
+
+            if not checkbox_stable or not checkbox_element:
+                logger.warning(f"Mietprofil checkbox not stable after {max_wait_seconds}s")
+                return False
+
+            # Additional small delay to ensure React event handlers are attached
+            time.sleep(0.3)
+
+            # Now check the current state of the checkbox
+            is_checked = checkbox_element.is_selected()
+
+            # Also check via JavaScript for more reliability
+            js_checked = self.driver.execute_script(
+                "return document.getElementById('shareTenantProfile').checked;"
+            )
+
+            logger.debug(f"Checkbox state: is_selected()={is_checked}, JS checked={js_checked}")
+
+            if is_checked or js_checked:
+                logger.info("✓ Mietprofil checkbox already checked")
+                return True
+
+            # Checkbox is not checked - we need to check it
+            logger.info("Mietprofil checkbox not checked - enforcing...")
+
+            # Try multiple strategies to check the checkbox
+            strategies = [
+                ("click input element", lambda: checkbox_element.click()),
+                ("click via JavaScript", lambda: self.driver.execute_script(
+                    "document.getElementById('shareTenantProfile').click();"
+                )),
+                ("click styled wrapper", lambda: self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "div.Checkbox__StyledCheckbox-sc-7kkiwa-9"
+                ).click()),
+                ("click label", lambda: self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "label.Checkbox__CheckboxLabel-sc-7kkiwa-7"
+                ).click()),
+            ]
+
+            for strategy_name, strategy_func in strategies:
+                try:
+                    strategy_func()
+                    time.sleep(0.2)  # Wait for React to update
+
+                    # Verify it's now checked
+                    is_checked_after = checkbox_element.is_selected()
+                    js_checked_after = self.driver.execute_script(
+                        "return document.getElementById('shareTenantProfile').checked;"
+                    )
+
+                    if is_checked_after or js_checked_after:
+                        logger.info(f"✓ Mietprofil checkbox checked successfully using {strategy_name}")
+                        return True
+                    else:
+                        logger.debug(f"  {strategy_name} clicked but checkbox not checked")
+
+                except Exception as e:
+                    logger.debug(f"  {strategy_name} failed: {e}")
+                    continue
+
+            # If we got here, all strategies failed
+            logger.warning("✗ Failed to check Mietprofil checkbox with all strategies")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error enforcing Mietprofil checkbox: {e}")
+            return False
 
     def _handle_popups(self):
         """Handle any popups that might appear (cookies, privacy, security).
@@ -376,9 +498,15 @@ class WillhabenContactBot:
                     except Exception as e:
                         logger.debug(f"Viewing checkbox not found or not available: {e}")
 
-                    # Mietprofil checkbox: Should be auto-checked for logged-in users
-                    # We don't interact with it to avoid race conditions with React hydration
-                    logger.info("Mietprofil checkbox should be auto-checked (logged-in users)")
+                    # Mietprofil checkbox handling
+                    if self.enforce_mietprofil_sharing:
+                        # Enforce mode: Actively ensure checkbox is checked
+                        self._enforce_mietprofil_checkbox()
+                        self._random_delay(0.1, 0.2)
+                    else:
+                        # Default mode: Should be auto-checked for logged-in users
+                        # We don't interact with it to avoid race conditions with React hydration
+                        logger.info("Mietprofil checkbox should be auto-checked (logged-in users)")
 
                     # Find submit button
                     try:
