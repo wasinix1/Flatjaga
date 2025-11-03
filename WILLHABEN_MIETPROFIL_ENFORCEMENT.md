@@ -1,279 +1,184 @@
-# Willhaben Mietprofil Enforcement Mode
+# Willhaben Mietprofil (Tenant Profile) Handling
 
 ## Overview
 
-This feature implements a robust method to enforce that the "Mietprofil teilen" (Share Tenant Profile) checkbox is checked when contacting Willhaben listings. This addresses the known issue where React components don't load in time, causing the checkbox status to be incorrectly detected.
+The bot automatically ensures the "Mietprofil teilen" (Share Tenant Profile) checkbox is checked when contacting Willhaben listings. This happens automatically with no configuration required.
 
-## The Problem
+## How It Works
 
-- Willhaben uses React components that take time to load and hydrate
-- The "Mietprofil teilen" checkbox should be auto-checked for logged-in users
-- Race conditions with React hydration often cause the checkbox to fail to be checked
-- This results in contacts being sent without the tenant profile being shared
+### Verification at Submission Time
 
-## The Solution
+The bot verifies the Mietprofil checkbox **right before clicking the Submit button**:
 
-### Enforcement Modes: FAST vs STABLE
+1. **Check state** - Use JavaScript to check `checked` property (source of truth)
+2. **Only click if unchecked** - If checkbox is NOT checked, click the label to check it
+3. **Skip if checked** - If already checked, do nothing (clicking would uncheck it!)
+4. **Skip if uncertain** - If state can't be determined, assume it's checked (safer)
 
-When enforcement is enabled, you choose between two modes:
+### Why This Approach?
 
-**FAST Mode** (Default when enforcement enabled):
-- Simple 2-method state verification
-- Single attempt with 4 click strategies
-- Quick and efficient
-- Good for most use cases
+**Previous approach was overengineered:**
+- 400+ lines of complex "strategy" code
+- FAST vs STABLE modes with different behaviors
+- Multiple state detection methods with voting
+- Network idle detection, persistence verification
+- All this complexity tried to check the checkbox early in the form flow
 
-**STABLE Mode** (Maximum reliability):
-- 4-method state detection with confidence scoring
-- Network idle detection (waits for page fully loaded)
-- State persistence verification (checks state after 500ms)
-- Viewport scrolling with smooth animation
-- Randomized strategy order (stealth)
-- 3 retry attempts with exponential backoff
-- Variable human-like delays
+**The fatal flaw:** Checking the checkbox early means subsequent form interactions (like clicking other checkboxes) could trigger React re-renders that uncheck it.
 
-## Configuration
-
-Add these lines to your `config.yaml` under the Willhaben section:
-
-```yaml
-# Willhaben auto-contact configuration
-willhaben_auto_contact: true
-willhaben_headless: true
-willhaben_delay_min: 0.5
-willhaben_delay_max: 2.0
-
-# Enforce Mietprofil sharing checkbox is checked (recommended if checkbox often fails)
-willhaben_enforce_mietprofil_sharing: false  # Set to true to enable enforcement mode
-
-# Enable stable mode for maximum reliability and stealth (requires enforcement enabled)
-willhaben_mietprofil_stable_mode: false  # Set to true for enhanced features
-```
-
-### Configuration Modes
-
-**Mode 1: Disabled (Default)**
-```yaml
-willhaben_enforce_mietprofil_sharing: false
-willhaben_mietprofil_stable_mode: false
-```
-- No active checking, relies on Willhaben's auto-check
-- Minimal interaction with the page
-
-**Mode 2: FAST Enforcement**
-```yaml
-willhaben_enforce_mietprofil_sharing: true
-willhaben_mietprofil_stable_mode: false
-```
-- Actively checks and enforces the checkbox
-- 2-method state verification (is_selected + JS checked)
-- Single attempt with 4 click strategies
-- Quick and efficient
-- Good for most use cases
-
-**Mode 3: STABLE Enforcement (Recommended for A/B Testing)**
-```yaml
-willhaben_enforce_mietprofil_sharing: true
-willhaben_mietprofil_stable_mode: true
-```
-- All FAST mode features PLUS:
-- Network idle detection (waits for page fully loaded)
-- Enhanced 4-method state detection with confidence scoring
-- State persistence checking (verifies checkbox stays checked after 500ms)
-- Viewport scrolling with smooth animation (ensures element visible)
-- Randomized strategy order (less predictable pattern)
-- Variable delays (more human-like timing)
-- 3 retry attempts with exponential backoff (0.5s, 1s, 2s)
-- Maximum reliability and stealth
-
-### When to Enable Each Mode
-
-**Enable FAST Mode** if:
-- You frequently see listings contacted without the Mietprofil being shared
-- You want good reliability without maximum overhead
-- You're experiencing the React loading timing issue occasionally
-- You want quick enforcement without extra verification
-
-**Enable STABLE Mode** if:
-- FAST mode still has occasional failures
-- You want maximum reliability and detection resistance
-- You're doing A/B testing between FAST and STABLE modes
-- You value stealth and human-like behavior
-- You need state persistence verification to protect against React re-renders
-- You want comprehensive confidence-scored state detection
-
-**Keep Disabled** (default) if:
-- The auto-check mechanism is working reliably for you
-- You want absolute minimum page interaction
-- You've verified checkbox is consistently working
+**New approach is simple:**
+- ~60 lines of straightforward code
+- Single code path (no modes)
+- One state detection method (JavaScript `checked` property)
+- Verify **right before submission** - nothing can uncheck it after
 
 ## Implementation Details
 
-### Code Changes
-
-1. **`flathunter/willhaben_contact_bot.py`**
-   - Added `enforce_mietprofil_sharing` and `mietprofil_stable_mode` parameters to `__init__`
-   - Added helper methods:
-     - `_wait_for_network_idle()`: Detects when network requests complete
-     - `_get_comprehensive_checkbox_state()`: 4-method state verification
-     - `_verify_checkbox_state_persistence()`: Checks state doesn't change after 500ms
-     - `_ensure_element_in_viewport()`: Smooth scrolling into view
-   - Rewrote `_enforce_mietprofil_checkbox()` with stable mode logic
-   - Updated email form handling to call enforcement when enabled
-
-2. **`flathunter/willhaben_contact_processor.py`**
-   - Added config reading for both enforcement and stable mode settings
-   - Passes both settings to all bot instances
-
-### Stable Mode Features Explained
-
-**1. Network Idle Detection**
-- Monitors `window.performance.getEntriesByType('resource')`
-- Waits until no new network requests for 0.5 seconds
-- Ensures page is fully loaded before interacting
-- Timeout: 2 seconds max
-
-**2. Enhanced State Detection (4 Methods)**
-```python
-is_selected()           # Selenium native check
-js_checked              # JavaScript checked property
-has_checked_class       # React wrapper CSS classes
-svg_visible             # Checkmark icon visibility
-```
-- Uses majority vote (2/3 agreement = high confidence)
-- Trusts `is_selected()` and `js_checked` over visual indicators
-
-**3. State Persistence Verification**
-- After clicking, waits 500ms
-- Re-checks state with all 4 methods
-- Protects against React re-renders unchecking the box
-- Retries if state doesn't persist
-
-**4. Viewport Scrolling**
-- Checks if element is in viewport before clicking
-- Smooth scroll if needed (`behavior: 'smooth'`)
-- More human-like than instant scrolling
-- Centers element in viewport
-
-**5. Stealth Features**
-- **Randomized strategy order**: Different click sequence each time
-- **Variable delays**: 0.15-0.25s instead of fixed 0.2s
-- **Label-first clicking**: Most human-like interaction
-- **Smooth scrolling**: Natural animation instead of instant jump
-
-**6. Retry Logic**
-- 3 total attempts (vs 1 in FAST mode)
-- Exponential backoff: 0.5s, 1s, 2s
-- Each retry uses fresh randomized strategy order
-- Comprehensive error logging
-
-### Technical Approach (FAST Mode)
-
-The FAST enforcement method uses this approach:
+### Single Source of Truth
 
 ```python
-# 1. Wait for checkbox and wrapper to be present and stable
-for attempt in range(max_attempts):
-    checkbox = find_element(By.ID, "shareTenantProfile")
-    wrapper = find_element(By.CSS_SELECTOR, "div.Checkbox__StyledCheckbox-sc-7kkiwa-9")
-    if both_exist:
-        break
-    sleep(0.2)
-
-# 2. Additional delay for React event handlers to attach
-sleep(0.3)
-
-# 3. Check current state with multiple methods
-is_checked = checkbox.is_selected()
-js_checked = execute_script("return checkbox.checked")
-
-# 4. If not checked, try multiple click strategies
-strategies = [
-    click_input_element,
-    click_via_javascript,
-    click_styled_wrapper,
-    click_label
-]
-
-# 5. Verify after each click attempt
-verify_checked_after_click()
+def _get_mietprofil_checkbox_state(self):
+    """JavaScript checked property is what gets submitted"""
+    return self.driver.execute_script(
+        "return document.getElementById('shareTenantProfile')?.checked || false;"
+    )
 ```
+
+### Human-Like Checking
+
+```python
+def _ensure_mietprofil_checked(self):
+    """Only clicks if we can confirm it's currently UNCHECKED"""
+
+    # Check current state
+    is_checked = self._get_mietprofil_checkbox_state()
+
+    if is_checked is None:
+        # Can't determine - skip interaction (safer)
+        return True
+
+    if is_checked:
+        # Already checked - do nothing
+        return True
+
+    # Not checked - need to check it
+    label = find_element("label[for='shareTenantProfile']")
+
+    # Scroll into view smoothly (human-like)
+    scroll_smooth(label)
+    time.sleep(random(0.3, 0.5))
+
+    # Click the label (most reliable for React forms)
+    label.click()
+    time.sleep(0.3)  # Wait for React update
+
+    # Verify it's now checked
+    return self._get_mietprofil_checkbox_state()
+```
+
+### Integration in Contact Flow
+
+Located in `send_contact_message()` method:
+
+```python
+# After form is ready and submit button is found...
+
+# Final check: Ensure Mietprofil is checked (email forms only)
+if form_type == "email":
+    if not self._ensure_mietprofil_checked():
+        logger.error("Failed to verify Mietprofil - aborting")
+        return False
+
+# NOW click submit (checkbox verified)
+submit_button.click()
+```
+
+## Configuration
+
+**No configuration needed!** The behavior is always active for email forms (company listings).
+
+The old config options have been removed:
+- ❌ `willhaben_enforce_mietprofil_sharing` (deleted)
+- ❌ `willhaben_mietprofil_stable_mode` (deleted)
+
+## Benefits of New Approach
+
+| Aspect | Old Approach | New Approach |
+|--------|--------------|--------------|
+| **Lines of code** | 400+ lines | ~60 lines |
+| **Complexity** | 3 modes, voting, retries | Single straightforward path |
+| **State detection** | 4 methods with voting | 1 method (JavaScript) |
+| **Timing** | Early in form flow | Right before submission |
+| **Reliability** | Could be unchecked after | Cannot be unchecked after |
+| **Debuggability** | Hard to trace failures | Easy to understand |
+| **Maintainability** | Fragile, complex | Simple, robust |
+
+## Why It Was Failing Before
+
+1. **Checked too early** - Checkbox verified at line ~780, but submit button clicked at line ~850
+2. **React could re-render** - Other form interactions could uncheck it
+3. **Never re-verified** - No check right before submission
+4. **Overengineered** - Complexity masked the real problem
 
 ## HTML Elements Targeted
 
 The checkbox structure:
 
 ```html
-<div class="Box-sc-wfmb7k-0 bkWefa">
-  <label class="Checkbox__CheckboxLabel-sc-7kkiwa-7 hTyxpL">
-    <input type="checkbox"
-           id="shareTenantProfile"
-           data-testid="share-tenant-profile-checkbox"
-           name="shareTenantProfile">
-    <div class="Checkbox__CheckboxInputWrapper-sc-7kkiwa-8 dVyplE">
-      <div class="Checkbox__StyledCheckbox-sc-7kkiwa-9 flZUsv">
-        <!-- SVG icons -->
-      </div>
-    </div>
-    <span id="shareTenantProfile-label">Mietprofil teilen</span>
-  </label>
-</div>
+<label for="shareTenantProfile">
+  <input type="checkbox"
+         id="shareTenantProfile"
+         data-testid="share-tenant-profile-checkbox"
+         name="shareTenantProfile">
+  <span>Mietprofil teilen</span>
+</label>
 ```
 
 ## Logging
 
-**Disabled Mode (Default):**
+**When checkbox is already checked:**
 ```
-INFO: Mietprofil checkbox should be auto-checked (logged-in users)
-```
-
-**FAST Enforcement Mode:**
-```
-INFO: Enforcing Mietprofil checkbox [FAST mode]...
-DEBUG: ✓ Checkbox stable (attempt 3)
-DEBUG: Initial state: False
-INFO: Mietprofil checkbox not checked - enforcing...
-INFO: ✓ Checkbox enforced via click label
+INFO: Verifying Mietprofil checkbox before submission...
+DEBUG: ✓ Mietprofil already checked
 ```
 
-**STABLE Mode:**
+**When checkbox needs to be checked:**
 ```
-INFO: Enforcing Mietprofil checkbox [STABLE mode]...
-DEBUG: Waiting for network idle...
-DEBUG: ✓ Network idle detected after 0.87s
-DEBUG: ✓ Checkbox stable (attempt 2)
-DEBUG: ✓ Mietprofil checkbox already in viewport
-DEBUG: State check: is_selected=True, js_checked=True, svg_visible=True, confidence=high, final=True
-DEBUG: Initial state: True (confidence: high)
-DEBUG: ✓ State persistence verified: True
-INFO: ✓ Mietprofil checkbox already checked (verified)
+INFO: Verifying Mietprofil checkbox before submission...
+INFO: Mietprofil not checked - checking now...
+DEBUG: Clicked Mietprofil label
+INFO: ✓ Mietprofil successfully checked
 ```
 
-**STABLE Mode with Retry:**
+**When verification fails:**
 ```
-INFO: Enforcing Mietprofil checkbox [STABLE mode]...
-DEBUG: ✓ Checkbox stable (attempt 4)
-DEBUG: Initial state: False (confidence: high)
-INFO: Mietprofil checkbox not checked - enforcing...
-DEBUG:   click styled wrapper clicked but not checked
-DEBUG:   click via JavaScript failed: ...
-INFO: ✓ Checkbox enforced via click label (verified)
+INFO: Verifying Mietprofil checkbox before submission...
+ERROR: ✗ Mietprofil still not checked after click
+ERROR: Failed to verify Mietprofil checkbox - aborting submission
 ```
 
-## Testing
+## Files Modified
 
-To test the enforcement mode:
+1. **`flathunter/willhaben_contact_bot.py`**
+   - Removed: `_wait_for_network_idle()`, `_get_comprehensive_checkbox_state()`, `_verify_checkbox_state_persistence()`, `_ensure_element_in_viewport()`, `_enforce_mietprofil_checkbox()`
+   - Added: `_get_mietprofil_checkbox_state()`, `_ensure_mietprofil_checked()`
+   - Updated: `send_contact_message()` to verify checkbox right before submission
+   - Removed: `enforce_mietprofil_sharing` and `mietprofil_stable_mode` parameters
 
-1. Enable it in config.yaml
-2. Run the bot with a visible browser (headless=false) to observe
-3. Watch the logs to see which strategy succeeds
-4. Verify the checkbox is checked before the form is submitted
+2. **`flathunter/willhaben_contact_processor.py`**
+   - Removed config reading for old enforcement settings
+   - Simplified bot initialization (no mode parameters)
 
-## Future Improvements
+3. **`config_mietprofil_example.yaml`**
+   - Updated documentation to reflect new approach
 
-Potential enhancements:
+## Troubleshooting
 
-- Configurable wait timeout (currently hardcoded to 3 seconds)
-- More sophisticated React hydration detection
-- Fallback to Selenium WebDriverWait with explicit conditions
-- Integration with retry logic if enforcement fails
+If tenant profile sharing still fails:
+
+1. **Check account setup** - Ensure your Mietprofil is complete on willhaben.at
+2. **Verify login** - Make sure cookies are valid and you're actually logged in
+3. **Check form type** - Mietprofil checkbox only exists on email forms (company listings), not messaging forms (private listings)
+4. **Review logs** - Check if checkbox verification succeeded before submission
+
+The new simple approach makes debugging much easier - if it fails, you'll know exactly why.

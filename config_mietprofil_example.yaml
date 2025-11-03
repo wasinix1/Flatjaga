@@ -1,4 +1,4 @@
-# Example config snippet for Willhaben Mietprofil enforcement
+# Example config snippet for Willhaben auto-contact
 # Add this to your config.yaml under the Willhaben section
 
 # Willhaben auto-contact configuration
@@ -7,32 +7,21 @@ willhaben_headless: true
 willhaben_delay_min: 0.5
 willhaben_delay_max: 2.0
 
-# NEW: Enforce Mietprofil sharing checkbox is checked
-# Set to true to actively ensure the "Mietprofil teilen" checkbox is checked
-# Uses robust waiting mechanism for React components to load
-# Recommended if the checkbox is often failing to be checked automatically
-willhaben_enforce_mietprofil_sharing: false  # Change to true to enable (FAST mode)
-
-# NEW: Enable STABLE mode for maximum reliability and stealth
-# Requires willhaben_enforce_mietprofil_sharing to be true
-# false = FAST mode (quick, simple verification)
-# true  = STABLE mode (network idle, 4-method state check, persistence verification,
-#                       viewport scrolling, randomized strategies, 3 retries with backoff)
-# Recommended for A/B testing and maximum detection resistance
-willhaben_mietprofil_stable_mode: false  # Change to true for STABLE mode
-
-# ===== CONFIGURATION MODES =====
+# ===== MIETPROFIL (TENANT PROFILE) HANDLING =====
 #
-# Mode 1 - Disabled (Default):
-#   willhaben_enforce_mietprofil_sharing: false
-#   willhaben_mietprofil_stable_mode: false
+# The Mietprofil checkbox is ALWAYS verified and checked before form submission.
+# This happens automatically for email forms (company listings).
 #
-# Mode 2 - FAST Enforcement:
-#   willhaben_enforce_mietprofil_sharing: true
-#   willhaben_mietprofil_stable_mode: false
-#   (2-method state check, single attempt, 4 click strategies)
+# How it works:
+# - Right before clicking "Submit", the bot checks if the Mietprofil checkbox is checked
+# - If it's NOT checked, the bot will click the label to check it
+# - If it's already checked, the bot does nothing (to avoid unchecking it)
+# - If the state can't be determined, the bot skips interaction (safer)
 #
-# Mode 3 - STABLE Enforcement (Recommended for A/B testing):
-#   willhaben_enforce_mietprofil_sharing: true
-#   willhaben_mietprofil_stable_mode: true
-#   (4-method state check, persistence verification, 3 retries, stealth features)
+# This approach is:
+# - Simple: One state check method (JavaScript checked property)
+# - Reliable: Check happens right before submission (nothing can uncheck it after)
+# - Human-like: Smooth scroll into view, then click the label element
+# - Safe: Only clicks if we can confirm it's currently unchecked
+#
+# No configuration needed - this behavior is built-in and always active.
