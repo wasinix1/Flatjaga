@@ -114,21 +114,54 @@ class WillhabenContactBot:
         logger.warning(f"✗ All click strategies failed for {description}")
         return False
 
+    def _get_mietprofil_checkbox(self, timeout=5):
+        """
+        Get the Mietprofil checkbox element with explicit wait.
+        Uses XPath to find the checkbox within a label containing "Mietprofil teilen" text.
+
+        Args:
+            timeout: Maximum time to wait for element (default 5 seconds)
+
+        Returns:
+            WebElement if found, None if not found within timeout
+        """
+        try:
+            # XPath that finds the checkbox input inside a label with "Mietprofil teilen" text
+            xpath = "//form//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']"
+
+            checkbox = WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH, xpath))
+            )
+            logger.debug("Found Mietprofil checkbox via XPath")
+            return checkbox
+        except TimeoutException:
+            logger.warning(f"Mietprofil checkbox not found within {timeout}s")
+            return None
+        except Exception as e:
+            logger.error(f"Error finding Mietprofil checkbox: {e}")
+            return None
+
     def _get_mietprofil_checkbox_state(self):
         """
         Check if Mietprofil checkbox is currently checked.
-        JavaScript checked property is the source of truth (what gets submitted).
 
         Returns:
-            True if checked, False if unchecked, None if can't determine
+            True if checked, False if unchecked
         """
         try:
-            return self.driver.execute_script(
-                "return document.getElementById('shareTenantProfile')?.checked || false;"
-            )
+            checkbox = self._get_mietprofil_checkbox(timeout=3)
+            if checkbox is None:
+                logger.warning("Mietprofil checkbox not found - assuming unchecked")
+                return False
+
+            # Check via element property (most reliable)
+            is_checked = checkbox.is_selected()
+            logger.debug(f"Mietprofil checkbox state: {'checked' if is_checked else 'unchecked'}")
+            return is_checked
+
         except Exception as e:
-            logger.debug(f"Could not determine Mietprofil checkbox state: {e}")
-            return None
+            logger.error(f"Error checking Mietprofil state: {e}")
+            return False
 
     def _ensure_mietprofil_checked(self):
         """
@@ -140,13 +173,14 @@ class WillhabenContactBot:
             True if checkbox is checked (or we made it checked), False if failed
         """
         try:
-            # Check current state
-            is_checked = self._get_mietprofil_checkbox_state()
+            # Get checkbox element
+            checkbox = self._get_mietprofil_checkbox(timeout=5)
+            if checkbox is None:
+                logger.error("Cannot find Mietprofil checkbox - form may not have loaded")
+                return False
 
-            if is_checked is None:
-                # Can't determine state - skip interaction (safer to assume it's checked)
-                logger.warning("Cannot determine Mietprofil state - skipping interaction")
-                return True
+            # Check current state
+            is_checked = checkbox.is_selected()
 
             if is_checked:
                 logger.debug("✓ Mietprofil already checked")
@@ -155,11 +189,11 @@ class WillhabenContactBot:
             # Not checked - need to check it
             logger.info("Mietprofil not checked - checking now...")
 
-            # Find the label element (most reliable for React forms)
-            label = self.driver.find_element(
-                By.CSS_SELECTOR,
-                "label[for='shareTenantProfile']"
-            )
+            # Get the parent label element (most reliable for React forms)
+            label = self.driver.execute_script("return arguments[0].parentElement;", checkbox)
+            if not label:
+                logger.error("Cannot find label element for Mietprofil checkbox")
+                return False
 
             # Scroll into view with smooth behavior (human-like)
             self.driver.execute_script(
@@ -176,7 +210,7 @@ class WillhabenContactBot:
             time.sleep(0.3)
 
             # Verify it's now checked
-            final_state = self._get_mietprofil_checkbox_state()
+            final_state = checkbox.is_selected()
             if final_state:
                 logger.info("✓ Mietprofil successfully checked")
                 return True
