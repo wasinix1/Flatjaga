@@ -10,7 +10,7 @@ from selenium.common.exceptions import InvalidSessionIdException, WebDriverExcep
 import time
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as dtime
 
 
 class WgGesuchtContactProcessor:
@@ -246,6 +246,41 @@ class WgGesuchtContactProcessor:
 
             return False
 
+    def _should_contact_now(self):
+        """
+        Check if current time is within business hours.
+        Returns True if:
+        - Business hours are not enabled in config, OR
+        - Current time is within configured business hours
+        """
+        # Check if business hours feature is enabled
+        business_hours_config = self.config.get('contact_business_hours', {})
+        if not business_hours_config.get('enabled', False):
+            return True  # Feature not enabled, allow contacting anytime
+
+        # Get configured time window
+        from flathunter.time_utils import is_current_time_between
+
+        try:
+            time_from_str = business_hours_config.get('from', '08:00')
+            time_till_str = business_hours_config.get('till', '20:00')
+
+            # Parse time strings (format: "HH:MM")
+            time_from = dtime.fromisoformat(time_from_str)
+            time_till = dtime.fromisoformat(time_till_str)
+
+            # Check if current time is within business hours
+            within_hours = is_current_time_between(time_from, time_till)
+
+            if not within_hours:
+                logger.info(f"Outside business hours ({time_from_str}-{time_till_str}) - will skip contacting")
+
+            return within_hours
+
+        except (ValueError, AttributeError) as e:
+            logger.error(f"Invalid business hours config: {e} - allowing contact")
+            return True  # On error, allow contact (fail-safe)
+
     def keep_session_active(self):
         """
         Check and validate session to prevent expiry.
@@ -364,6 +399,13 @@ class WgGesuchtContactProcessor:
                 logger.info(f"Skipping - title already contacted: {title[:50]}...")
                 expose['_auto_contacted'] = False
                 return expose
+
+        # Check business hours
+        if not self._should_contact_now():
+            title = expose.get('title', 'Unknown')
+            logger.info(f"Outside business hours - skipping contact for: {title[:50]}...")
+            expose['_auto_contacted'] = False
+            return expose
 
         # Init bot if needed
         if not self._init_bot():
