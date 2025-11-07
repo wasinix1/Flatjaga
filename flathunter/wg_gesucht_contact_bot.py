@@ -35,13 +35,163 @@ class ContactFailedException(Exception):
     pass
 
 
+class HumanBehavior:
+    """Simulates human-like browser interactions."""
+
+    @staticmethod
+    def realistic_delay(min_sec=1, max_sec=3, action_type="normal"):
+        """
+        Human-realistic delays with variation based on action type.
+
+        Action types:
+        - "reading": Longer pause (user is reading content)
+        - "thinking": Medium pause (user is deciding what to do)
+        - "typing": Very short pause (between keystrokes)
+        - "normal": Standard interaction delay
+        """
+        base_delays = {
+            "reading": (3, 7),
+            "thinking": (2, 5),
+            "typing": (0.05, 0.25),
+            "normal": (min_sec, max_sec)
+        }
+
+        min_d, max_d = base_delays.get(action_type, (min_sec, max_sec))
+        delay = random.uniform(min_d, max_d)
+
+        # Add micro-pauses for realism (humans don't have perfectly smooth timing)
+        if random.random() < 0.3:  # 30% chance of slight hesitation
+            delay += random.uniform(0.1, 0.5)
+
+        time.sleep(delay)
+
+    @staticmethod
+    def human_type(element, text, driver):
+        """
+        Type text like a human - with realistic speed variation.
+
+        Humans don't type at constant speed:
+        - Sometimes fast (comfortable words)
+        - Sometimes slow (thinking/complex words)
+        - Occasional mistakes (rare, but happens)
+        """
+        # Clear field first
+        element.clear()
+        time.sleep(random.uniform(0.1, 0.3))
+
+        words = text.split(' ')
+        for i, word in enumerate(words):
+            # Type word character by character
+            for char in word:
+                element.send_keys(char)
+
+                # Variable typing speed
+                if random.random() < 0.7:  # 70% normal speed
+                    time.sleep(random.uniform(0.08, 0.15))
+                elif random.random() < 0.15:  # 15% fast (familiar text)
+                    time.sleep(random.uniform(0.03, 0.06))
+                else:  # 15% slow (thinking/careful)
+                    time.sleep(random.uniform(0.2, 0.4))
+
+            # Add space after word (if not last word)
+            if i < len(words) - 1:
+                element.send_keys(' ')
+                time.sleep(random.uniform(0.1, 0.2))
+
+        # Small pause after finishing typing (user reviews what they wrote)
+        time.sleep(random.uniform(0.5, 1.5))
+
+    @staticmethod
+    def human_scroll(driver, direction="down", distance=None):
+        """
+        Scroll like a human reading the page.
+
+        Args:
+            direction: "down" or "up"
+            distance: Pixels to scroll (None = random)
+        """
+        if distance is None:
+            distance = random.randint(200, 500)
+
+        scroll_amount = distance if direction == "down" else -distance
+
+        # Scroll in chunks (humans don't scroll in one perfect motion)
+        chunks = random.randint(2, 4)
+        chunk_size = scroll_amount // chunks
+
+        for _ in range(chunks):
+            driver.execute_script(f"window.scrollBy(0, {chunk_size});")
+            time.sleep(random.uniform(0.1, 0.3))
+
+        # Pause after scrolling (reading content)
+        time.sleep(random.uniform(0.5, 1.5))
+
+    @staticmethod
+    def move_to_element_human(driver, element):
+        """
+        Move cursor to element in a human-like way.
+        Not actual cursor movement, but simulates the timing/behavior.
+        """
+        # Scroll element into view first (like a human would)
+        driver.execute_script(
+            "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+            element
+        )
+
+        # Wait a moment (human eyes track movement)
+        time.sleep(random.uniform(0.3, 0.8))
+
+        # Small pause before interacting (human aims cursor)
+        time.sleep(random.uniform(0.2, 0.5))
+
+    @staticmethod
+    def human_click(driver, element, description="element"):
+        """
+        Click element with human-like behavior.
+        Includes hover simulation and realistic timing.
+        """
+        try:
+            # Move to element
+            HumanBehavior.move_to_element_human(driver, element)
+
+            # Hover before click (simulate mouse movement)
+            driver.execute_script("""
+                var element = arguments[0];
+                var event = new MouseEvent('mouseover', {
+                    'view': window,
+                    'bubbles': true,
+                    'cancelable': true
+                });
+                element.dispatchEvent(event);
+            """, element)
+
+            # Small delay (human hand-eye coordination)
+            time.sleep(random.uniform(0.1, 0.3))
+
+            # Click
+            element.click()
+
+            logger.debug(f"✓ Human-clicked {description}")
+            return True
+
+        except Exception as e:
+            # Fallback to JS click
+            try:
+                driver.execute_script("arguments[0].click();", element)
+                logger.debug(f"✓ JS-clicked {description} (fallback)")
+                return True
+            except:
+                logger.warning(f"✗ Failed to click {description}: {e}")
+                return False
+
+
 class WgGesuchtContactBot:
     """
     WG-Gesucht contact automation bot.
     Handles session management and contact flow internally.
     """
     
-    def __init__(self, headless=True, template_index=0, delay_min=0.5, delay_max=1.5):
+    def __init__(self, headless=True, template_index=0, delay_min=0.5, delay_max=1.5, stealth_mode=False):
         """
         Initialize bot with session management.
 
@@ -50,15 +200,17 @@ class WgGesuchtContactBot:
             template_index: Which template to use (default 0 = first)
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
+            stealth_mode: Enable stealth mode with undetected-chromedriver and human-like behavior (default False)
         """
         self.headless = headless
         self.template_index = template_index
         self.delay_min = delay_min
         self.delay_max = delay_max
+        self.stealth_mode = stealth_mode
         self.driver = None
         self.session_valid = False
 
-        logger.info("Initializing WG-Gesucht bot...")
+        logger.info(f"Initializing WG-Gesucht bot (stealth_mode={stealth_mode})...")
 
     def start(self):
         """Start the bot and initialize the driver."""
@@ -66,19 +218,45 @@ class WgGesuchtContactBot:
         # Note: Session loading is handled by load_cookies() method, called by processor
         # Manual login should only happen in setup_sessions.py, not during automated runs
     
-    def _random_delay(self, min_sec=None, max_sec=None):
+    def _random_delay(self, min_sec=None, max_sec=None, action_type="normal"):
         """Add random delay to mimic human behavior.
 
         Args:
             min_sec: Minimum delay in seconds (uses self.delay_min if not specified)
             max_sec: Maximum delay in seconds (uses self.delay_max if not specified)
+            action_type: Type of action for stealth mode (reading, thinking, typing, normal)
         """
-        if min_sec is None:
-            min_sec = self.delay_min
-        if max_sec is None:
-            max_sec = self.delay_max
+        if self.stealth_mode:
+            # Use human-realistic delays in stealth mode
+            HumanBehavior.realistic_delay(
+                min_sec=min_sec or self.delay_min,
+                max_sec=max_sec or self.delay_max,
+                action_type=action_type
+            )
+        else:
+            # Use simple random delay in regular mode
+            if min_sec is None:
+                min_sec = self.delay_min
+            if max_sec is None:
+                max_sec = self.delay_max
+            time.sleep(random.uniform(min_sec, max_sec))
 
-        time.sleep(random.uniform(min_sec, max_sec))
+    def _click_element(self, element, description="element"):
+        """Click element with optional stealth behavior.
+
+        Args:
+            element: Selenium WebElement to click
+            description: Description for logging
+
+        Returns:
+            True if click succeeded, False otherwise
+        """
+        if self.stealth_mode:
+            # Use human-like clicking in stealth mode
+            return HumanBehavior.human_click(self.driver, element, description)
+        else:
+            # Use regular click strategies
+            return self._try_click_element(element, description)
 
     def _try_click_element(self, element, description="element"):
         """Try multiple strategies to click an element.
@@ -113,7 +291,53 @@ class WgGesuchtContactBot:
         return False
 
     def _init_driver(self):
-        """Create Selenium driver."""
+        """Create Selenium driver with optional stealth mode."""
+        # If stealth mode is enabled, try to use undetected-chromedriver
+        if self.stealth_mode:
+            try:
+                import undetected_chromedriver as uc
+                logger.info("Using undetected-chromedriver for stealth mode")
+
+                # Use undetected-chromedriver
+                options = uc.ChromeOptions()
+                if self.headless:
+                    options.add_argument('--headless=new')
+
+                # Additional stealth options
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-web-security')
+                options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+
+                # Random window size to avoid fingerprinting
+                window_sizes = [(1920, 1080), (1366, 768), (1536, 864), (1440, 900)]
+                width, height = random.choice(window_sizes)
+                options.add_argument(f'--window-size={width},{height}')
+
+                self.driver = uc.Chrome(options=options, version_main=None)
+
+                # Additional JavaScript-level anti-detection
+                self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                    "userAgent": self.driver.execute_script("return navigator.userAgent").replace('Headless', '')
+                })
+
+                # Remove webdriver property
+                self.driver.execute_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                """)
+
+                logger.info(f"Undetected Chrome driver initialized ({width}x{height})")
+                return
+
+            except ImportError:
+                logger.warning("undetected_chromedriver not installed, falling back to regular Chrome")
+                logger.warning("Install with: pip install undetected-chromedriver")
+                logger.warning("Stealth mode will use regular Chrome with basic anti-detection")
+
+        # Regular Chrome driver (or fallback from stealth mode)
         chrome_options = Options()
         if self.headless:
             chrome_options.add_argument('--headless=new')
@@ -124,7 +348,8 @@ class WgGesuchtContactBot:
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
         self.driver = webdriver.Chrome(options=chrome_options)
-        logger.info("Chrome driver initialized")
+        mode = "stealth (fallback)" if self.stealth_mode else "regular"
+        logger.info(f"Chrome driver initialized ({mode} mode)")
 
     def load_cookies(self):
         """Load saved session cookies. Returns True if session is valid."""
@@ -293,20 +518,24 @@ class WgGesuchtContactBot:
             
             # Navigate to contact page
             self.driver.get(listing_url)
-            self._random_delay(1, 2)
-            
+            self._random_delay(1, 2, action_type="reading")
+
             # Check session
             if 'login' in self.driver.current_url.lower():
                 logger.error("Session expired - redirected to login")
                 self.session_valid = False
                 raise SessionExpiredException("Session expired - redirected to login page")
-            
+
+            # Scroll down a bit in stealth mode (humans browse before acting)
+            if self.stealth_mode:
+                HumanBehavior.human_scroll(self.driver, distance=random.randint(150, 350))
+
             # Cookie popup
             try:
                 accept_btn = WebDriverWait(self.driver, 3).until(
                     EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'Alle akzeptieren')]"))
                 )
-                self.driver.execute_script("arguments[0].click();", accept_btn)
+                self._click_element(accept_btn, "cookie accept button")
                 logger.info("  ✓ Accepted cookies")
                 self._random_delay(0.5, 1)
             except TimeoutException:
@@ -315,33 +544,33 @@ class WgGesuchtContactBot:
             # Adaptive popup handling
             security_done = False
             template_opened = False
-            
+
             for attempt in range(10):
                 self._random_delay(0.3, 0.7)
-                
+
                 # Security tips
                 if not security_done:
                     try:
                         confirm_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Ich habe die Sicherheitstipps gelesen')]")
                         if confirm_btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", confirm_btn)
+                            self._click_element(confirm_btn, "security tips button")
                             logger.info("  ✓ Dismissed security tips")
                             security_done = True
-                            self._random_delay(0.5, 1)
+                            self._random_delay(0.5, 1, action_type="thinking")
                             continue
                     except:
                         security_done = True
-                
+
                 # Template button (opens modal)
                 if security_done and not template_opened:
                     try:
                         template_span = self.driver.find_element(By.CSS_SELECTOR, "span[data-text_insert_template='Vorlage einfügen']")
                         parent_btn = template_span.find_element(By.XPATH, "./..")
                         if parent_btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", parent_btn)
+                            self._click_element(parent_btn, "template button")
                             logger.info("  ✓ Opened template modal")
                             template_opened = True
-                            self._random_delay(0.5, 1)
+                            self._random_delay(0.5, 1, action_type="thinking")
                             break
                     except:
                         pass
@@ -360,7 +589,7 @@ class WgGesuchtContactBot:
                 logger.error("Modal didn't appear")
                 return False
             
-            self._random_delay(0.3, 0.7)
+            self._random_delay(0.3, 0.7, action_type="thinking")
 
             # Click template label with smart wait
             try:
@@ -380,42 +609,23 @@ class WgGesuchtContactBot:
 
                 label = labels[self.template_index]
 
-                # Try multiple click strategies to ensure selection
-                clicked = False
-                strategies = [
-                    ("JavaScript click", lambda: self.driver.execute_script("arguments[0].click();", label)),
-                    ("scroll and JS click", lambda: (
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", label),
-                        time.sleep(0.1),
-                        self.driver.execute_script("arguments[0].click();", label)
-                    )),
-                ]
-
-                for strategy_name, strategy_func in strategies:
-                    try:
-                        strategy_func()
-                        logger.info(f"  ✓ Selected template {self.template_index} using {strategy_name}")
-                        clicked = True
-                        break
-                    except Exception as e:
-                        logger.debug(f"{strategy_name} failed: {e}")
-
-                if not clicked:
-                    logger.error("All template selection strategies failed")
+                # Use unified click method
+                if not self._click_element(label, f"template {self.template_index}"):
+                    logger.error("Could not select template")
                     return False
 
             except Exception as e:
                 logger.error(f"Could not select template: {e}")
                 return False
 
-            self._random_delay(0.3, 0.7)
+            self._random_delay(0.3, 0.7, action_type="thinking")
 
             # Click insert button in modal
             try:
                 insert_btn = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
                 )
-                self.driver.execute_script("arguments[0].click();", insert_btn)
+                self._click_element(insert_btn, "insert template button")
                 logger.info("  ✓ Clicked insert template button")
             except TimeoutException:
                 logger.error("Insert button not found")
@@ -460,13 +670,13 @@ class WgGesuchtContactBot:
                 logger.debug(f"Template insertion verification failed: {e}")
 
             self._random_delay(0.5, 1)
-            
+
             # Click send button
             try:
                 send_btn = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "conversation_send_button"))
                 )
-                self.driver.execute_script("arguments[0].click();", send_btn)
+                self._click_element(send_btn, "send button")
                 logger.info("  ✓ Clicked send")
             except TimeoutException:
                 logger.error("Send button not found")

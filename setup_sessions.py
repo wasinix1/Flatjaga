@@ -66,7 +66,8 @@ def setup_wggesucht():
             print("Old session deleted. Proceeding with new login...\n")
 
         # Initialize in non-headless mode for manual login
-        bot = WgGesuchtContactBot(headless=False)
+        # Stealth mode not needed for manual login
+        bot = WgGesuchtContactBot(headless=False, stealth_mode=False)
         bot.start()
 
         # Explicitly call manual login (used only in setup, not during automated runs)
