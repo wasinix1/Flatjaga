@@ -178,198 +178,127 @@ class WillhabenContactBot:
 
     def _get_mietprofil_checkbox(self, timeout=5):
         """
-        Get the Mietprofil checkbox element with explicit wait.
-        Uses XPath to find the checkbox within a label containing "Mietprofil teilen" text.
-
-        Args:
-            timeout: Maximum time to wait for element (default 5 seconds)
+        Get the Mietprofil teilen checkbox element.
 
         Returns:
-            WebElement if found, None if not found within timeout
+            WebElement if found, None if not found
         """
         try:
-            # XPath that finds the checkbox input inside a label with "Mietprofil teilen" text
-            xpath = "//form//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']"
+            wait = WebDriverWait(self.driver, timeout)
+            # Clean XPath without //form// prefix for better compatibility
+            xpath = "//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']"
 
-            checkbox = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, xpath))
-            )
-            logger.debug("Found Mietprofil checkbox via XPath")
+            checkbox = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
+            logger.debug(f"✓ Found Mietprofil checkbox")
             return checkbox
         except TimeoutException:
-            logger.warning(f"Mietprofil checkbox not found within {timeout}s")
+            logger.debug(f"Mietprofil checkbox not found within {timeout}s")
             return None
         except Exception as e:
-            logger.error(f"Error finding Mietprofil checkbox: {e}")
+            logger.debug(f"Error finding Mietprofil checkbox: {e}")
             return None
 
-    def _get_mietprofil_checkbox_state(self):
+    def _is_mietprofil_checked(self):
         """
-        Check if Mietprofil checkbox is currently checked.
+        Check if Mietprofil sharing checkbox is currently checked.
 
         Returns:
-            True if checked, False if unchecked
+            True if checked, False if unchecked or not found
         """
         try:
             checkbox = self._get_mietprofil_checkbox(timeout=3)
             if checkbox is None:
-                logger.warning("Mietprofil checkbox not found - assuming unchecked")
                 return False
 
-            # Check via element property (most reliable)
-            is_checked = checkbox.is_selected()
-            logger.debug(f"Mietprofil checkbox state: {'checked' if is_checked else 'unchecked'}")
-            return is_checked
+            # Use both Selenium and JavaScript to verify
+            is_selected = checkbox.is_selected()
+            is_checked_js = self.driver.execute_script("return arguments[0].checked;", checkbox)
+
+            logger.debug(f"Checkbox state: is_selected()={is_selected}, JS checked={is_checked_js}")
+            return is_selected or is_checked_js
 
         except Exception as e:
-            logger.error(f"Error checking Mietprofil state: {e}")
+            logger.debug(f"Error checking Mietprofil state: {e}")
             return False
 
     def _ensure_mietprofil_checked(self):
         """
         Ensure Mietprofil checkbox is checked before submission.
-        Uses multiple strategies with extensive logging.
-        BEST EFFORT - will try hard but won't block submission on failure.
+        Uses multiple strategies with detailed logging.
+        BEST EFFORT - tries hard but won't block submission on failure.
 
         Returns:
-            True if checkbox is checked (or we made it checked), False if failed
+            True if checkbox is verified as checked, False otherwise
         """
         try:
-            logger.info("=== STARTING MIETPROFIL CHECKBOX VERIFICATION ===")
+            logger.info("🔍 Verifying Mietprofil checkbox...")
 
-            # Step 1: Find checkbox with multiple selectors
-            checkbox = None
-            selectors = [
-                ("XPath (label text)", By.XPATH, "//form//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']"),
-                ("CSS (data-testid)", By.CSS_SELECTOR, "input[data-testid='share-tenant-profile-checkbox']"),
-                ("ID", By.ID, "shareTenantProfile"),
-                ("Name", By.CSS_SELECTOR, "input[name='shareTenantProfile']"),
-            ]
-
-            for selector_name, by_type, selector_value in selectors:
-                try:
-                    logger.debug(f"Trying selector: {selector_name}")
-                    checkbox = WebDriverWait(self.driver, 2).until(
-                        EC.presence_of_element_located((by_type, selector_value))
-                    )
-                    logger.info(f"✓ Found checkbox using: {selector_name}")
-                    break
-                except TimeoutException:
-                    logger.debug(f"  Selector '{selector_name}' not found")
-                    continue
-                except Exception as e:
-                    logger.debug(f"  Selector '{selector_name}' error: {e}")
-                    continue
-
+            # Step 1: Find the checkbox
+            checkbox = self._get_mietprofil_checkbox(timeout=5)
             if checkbox is None:
-                logger.warning("⚠️ Cannot find Mietprofil checkbox - form may not have it or not loaded yet")
-                logger.warning("Proceeding with submission anyway (best effort)")
+                logger.warning("⚠️  Mietprofil checkbox not found (form may not have it)")
                 return False
 
-            # Step 2: Log detailed debug info about the checkbox
-            logger.info("Found Mietprofil checkbox - logging debug info...")
+            # Step 2: Log debug info about the checkbox
             self._debug_log_element(checkbox, "Mietprofil checkbox")
 
-            # Step 3: Check current state
-            is_checked_selected = checkbox.is_selected()
-            is_checked_js = self.driver.execute_script("return arguments[0].checked;", checkbox)
-
-            logger.info(f"Current state: is_selected()={is_checked_selected}, JS checked={is_checked_js}")
-
-            if is_checked_selected or is_checked_js:
-                logger.info("✓ Mietprofil already checked - no action needed")
+            # Step 3: Check if already checked
+            if self._is_mietprofil_checked():
+                logger.info("✅ Mietprofil already checked")
                 return True
 
-            # Not checked - need to check it
-            logger.warning("⚠️ Mietprofil NOT checked - attempting to check it now...")
+            # Step 4: Not checked - try to check it with multiple strategies
+            logger.warning("⚠️  Mietprofil NOT checked - attempting to check it...")
 
-            # Step 4: Try multiple click/check strategies
-            strategies = []
+            # Get the parent label
+            label = self.driver.execute_script("return arguments[0].parentElement;", checkbox)
+            if label:
+                self._debug_log_element(label, "Mietprofil label")
 
-            # Get label element for strategies that need it
-            label = None
-            try:
-                label = self.driver.execute_script("return arguments[0].parentElement;", checkbox)
-                if label:
-                    logger.debug(f"Found parent label: <{label.tag_name}>")
-                    self._debug_log_element(label, "Mietprofil label")
-            except Exception as e:
-                logger.warning(f"Could not get parent label: {e}")
-
-            # Define all strategies
-            strategies.append(("Regular click on label", lambda: label.click() if label else None))
-            strategies.append(("JavaScript click on label", lambda: self.driver.execute_script("arguments[0].click();", label) if label else None))
-            strategies.append(("Regular click on checkbox", lambda: checkbox.click()))
-            strategies.append(("JavaScript click on checkbox", lambda: self.driver.execute_script("arguments[0].click();", checkbox)))
-            strategies.append(("JavaScript set checked=true", lambda: self.driver.execute_script("arguments[0].checked = true;", checkbox)))
-            strategies.append(("JavaScript set checked + dispatch change", lambda: self.driver.execute_script("""
-                arguments[0].checked = true;
-                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
-            """, checkbox)))
-            strategies.append(("Send Space key to checkbox", lambda: checkbox.send_keys(Keys.SPACE)))
-
-            # ActionChains strategy
-            def action_chains_click():
-                actions = ActionChains(self.driver)
-                actions.move_to_element(checkbox).click().perform()
-
-            strategies.append(("ActionChains click on checkbox", action_chains_click))
-
-            # Scroll and click label
-            def scroll_and_click_label():
-                if label:
-                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", label)
-                    time.sleep(0.2)
+            # Try multiple strategies to check the checkbox
+            strategies = [
+                ("Click label (regular)", lambda: label.click() if label else None),
+                ("Click label (JS)", lambda: self.driver.execute_script("arguments[0].click();", label) if label else None),
+                ("Click checkbox (regular)", lambda: checkbox.click()),
+                ("Click checkbox (JS)", lambda: self.driver.execute_script("arguments[0].click();", checkbox)),
+                ("Set checked=true (JS)", lambda: self.driver.execute_script("arguments[0].checked = true;", checkbox)),
+                ("Set checked + events (JS)", lambda: self.driver.execute_script("""
+                    arguments[0].checked = true;
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                    arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
+                """, checkbox)),
+                ("Send SPACE key", lambda: checkbox.send_keys(Keys.SPACE)),
+                ("ActionChains click", lambda: ActionChains(self.driver).move_to_element(checkbox).click().perform()),
+                ("Scroll + click label", lambda: (
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", label),
+                    time.sleep(0.2),
                     label.click()
+                ) if label else None),
+            ]
 
-            strategies.append(("Scroll into view + click label", scroll_and_click_label))
-
-            # Try each strategy
-            success = False
-            for strategy_num, (strategy_name, strategy_func) in enumerate(strategies, 1):
+            for i, (name, func) in enumerate(strategies, 1):
                 try:
-                    logger.info(f"Strategy {strategy_num}/{len(strategies)}: {strategy_name}")
+                    logger.info(f"  Strategy {i}/{len(strategies)}: {name}")
+                    func()
+                    time.sleep(0.4)  # Wait for React updates
 
-                    # Execute strategy
-                    strategy_func()
-                    logger.debug(f"  Executed {strategy_name}")
-
-                    # Wait for any animations/React updates
-                    time.sleep(0.4)
-
-                    # Check if it worked
-                    is_checked_after = checkbox.is_selected()
-                    is_checked_js_after = self.driver.execute_script("return arguments[0].checked;", checkbox)
-
-                    logger.debug(f"  After {strategy_name}: is_selected()={is_checked_after}, JS checked={is_checked_js_after}")
-
-                    if is_checked_after or is_checked_js_after:
-                        logger.info(f"✅ SUCCESS! {strategy_name} worked!")
-                        success = True
-                        break
+                    # Verify if it worked
+                    if self._is_mietprofil_checked():
+                        logger.info(f"✅ SUCCESS with strategy: {name}")
+                        return True
                     else:
-                        logger.warning(f"  Strategy '{strategy_name}' didn't check the box")
+                        logger.debug(f"  ❌ {name} - checkbox still not checked")
 
                 except Exception as e:
-                    logger.warning(f"  Strategy '{strategy_name}' failed: {e}")
-                    continue
+                    logger.debug(f"  ❌ {name} failed: {e}")
 
-            # Step 5: Final verification
-            if success:
-                logger.info("✅ Mietprofil successfully checked!")
-                return True
-            else:
-                logger.error("❌ All strategies failed - checkbox still not checked")
-                logger.warning("⚠️ Proceeding with submission anyway (best effort)")
-                return False
+            # All strategies failed
+            logger.error("❌ All strategies failed - checkbox not checked")
+            return False
 
         except Exception as e:
             logger.error(f"Critical error in Mietprofil verification: {e}", exc_info=True)
-            logger.warning("⚠️ Proceeding with submission anyway (best effort)")
             return False
-        finally:
-            logger.info("=== END MIETPROFIL CHECKBOX VERIFICATION ===")
 
 
     def _handle_popups(self):
@@ -431,6 +360,7 @@ class WillhabenContactBot:
     def start(self):
         """Start the Chrome WebDriver"""
         self.driver = webdriver.Chrome(options=self.options)
+        self.wait = WebDriverWait(self.driver, 10)  # Default 10s timeout
         print("✓ Browser started")
         logger.info("Browser started for Willhaben")
     
