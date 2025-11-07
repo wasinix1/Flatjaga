@@ -22,7 +22,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 
 from flathunter import proxies
 from flathunter.captcha.captcha_solver import CaptchaUnsolvableError
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.exceptions import ProxyException
 
 

@@ -2,7 +2,7 @@
 import re
 import json
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.abstract_crawler import Crawler
 
 class Subito(Crawler):

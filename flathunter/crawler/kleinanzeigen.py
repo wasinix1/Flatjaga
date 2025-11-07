@@ -5,7 +5,7 @@ import datetime
 from bs4 import Tag
 
 from flathunter.webdriver_crawler import WebdriverCrawler
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 
 class Kleinanzeigen(WebdriverCrawler):
     """Implementation of Crawler interface for Kleinanzeigen"""

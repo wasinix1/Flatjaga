@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 
 SESSION_TIMEOUT = 2 * 60 * 60  # 2 hours in seconds
 

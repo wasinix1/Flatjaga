@@ -7,7 +7,7 @@ from urllib.parse import urlencode, urlparse, parse_qs
 import requests
 
 from flathunter.abstract_crawler import Crawler
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.schemas.immobilienscout import ImmoscoutQuery
 
 STATIC_URL_PATTERN = re.compile(r'https://www\.immobilienscout24\.de')

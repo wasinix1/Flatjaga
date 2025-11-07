@@ -3,7 +3,7 @@ WG-Gesucht Auto-Contact Processor - WITH AUTO-RECOVERY
 Detects browser crashes and restarts automatically
 """
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.wg_gesucht_contact_bot import WgGesuchtContactBot, SessionExpiredException
 from flathunter.session_manager import SessionManager
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException

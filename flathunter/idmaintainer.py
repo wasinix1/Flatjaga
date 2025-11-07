@@ -5,7 +5,7 @@ import datetime
 import json
 import re
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.abstract_processor import Processor
 
 __author__ = "Nody"

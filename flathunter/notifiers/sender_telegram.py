@@ -10,7 +10,7 @@ from flathunter.abstract_processor import Processor
 from flathunter.config import YamlConfig
 from flathunter.exceptions import BotBlockedException
 from flathunter.exceptions import UserDeactivatedException
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.utils.list import chunk_list
 
 

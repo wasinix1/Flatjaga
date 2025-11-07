@@ -20,7 +20,7 @@ from flathunter.crawler.willhaben import Willhaben
 from flathunter.crawler.vrmimmo import VrmImmo
 from flathunter.crawler.subito import Subito
 from flathunter.filter import Filter
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.exceptions import ConfigException
 
 load_dotenv()

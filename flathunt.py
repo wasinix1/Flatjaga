@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 
 from flathunter.argument_parser import parse
-from flathunter.logging import logger, configure_logging
+from flathunter.logger_config import logger, configure_logging
 from flathunter.idmaintainer import IdMaintainer
 from flathunter.hunter import Hunter
 from flathunter.config import Config
