@@ -24,6 +24,9 @@ class WgGesuchtContactProcessor:
             wg_gesucht_auto_contact: bool - Enable auto-contact (default False)
             wg_gesucht_template_index: int - Which template to use (default 0)
             wg_gesucht_headless: bool - Run in headless mode (default True)
+            wg_gesucht_delay_min: float - Minimum delay between actions (default 0.5)
+            wg_gesucht_delay_max: float - Maximum delay between actions (default 1.5)
+            wg_gesucht_stealth_mode: bool - Enable stealth mode with undetected-chromedriver (default False)
         """
         self.config = config
         self.bot = None
@@ -40,6 +43,7 @@ class WgGesuchtContactProcessor:
         self.headless = config.get('wg_gesucht_headless', True)
         self.delay_min = config.get('wg_gesucht_delay_min', 0.5)
         self.delay_max = config.get('wg_gesucht_delay_max', 1.5)
+        self.stealth_mode = config.get('wg_gesucht_stealth_mode', False)
 
         # Track headless mode for fallback
         self.headless_original = self.headless  # Remember original setting
@@ -48,7 +52,7 @@ class WgGesuchtContactProcessor:
         # Setup failure log file
         self.failure_log_file = Path.home() / '.wg_gesucht_contact_failures.jsonl'
 
-        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, title cross-ref enabled, session tracking enabled)")
+        logger.info(f"WG-Gesucht auto-contact processor initialized (with auto-recovery, enabled={self.enabled}, headless={self.headless}, stealth_mode={self.stealth_mode}, title cross-ref enabled, session tracking enabled)")
 
     def _send_failure_notification(self, expose, error_message):
         """Send Telegram notification when contact fails"""
@@ -169,12 +173,13 @@ class WgGesuchtContactProcessor:
             delay_max = self.delay_max
 
         try:
-            logger.info(f"Starting WG-Gesucht contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s)...")
+            logger.info(f"Starting WG-Gesucht contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s, stealth_mode={self.stealth_mode})...")
             self.bot = WgGesuchtContactBot(
                 headless=headless_mode,
                 template_index=self.template_index,
                 delay_min=delay_min,
-                delay_max=delay_max
+                delay_max=delay_max,
+                stealth_mode=self.stealth_mode
             )
             self.bot.start()
 
@@ -275,7 +280,8 @@ class WgGesuchtContactProcessor:
                 headless=False,
                 template_index=self.template_index,
                 delay_min=self.delay_min,
-                delay_max=self.delay_max
+                delay_max=self.delay_max,
+                stealth_mode=self.stealth_mode
             )
             temp_bot.start()
 
