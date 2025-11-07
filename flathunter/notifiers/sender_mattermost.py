@@ -5,7 +5,7 @@ import requests
 
 from flathunter.abstract_notifier import Notifier
 from flathunter.abstract_processor import Processor
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 
 
 class SenderMattermost(Processor, Notifier):

@@ -6,7 +6,7 @@ from flathunter.idmaintainer import IdMaintainer
 from flathunter.googlecloud_idmaintainer import GoogleCloudIdMaintainer
 from flathunter.web_hunter import WebHunter
 from flathunter.config import Config
-from flathunter.logging import configure_logging
+from flathunter.logger_config import configure_logging
 
 from flathunter.web import app
 

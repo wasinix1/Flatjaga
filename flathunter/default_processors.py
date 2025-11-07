@@ -2,7 +2,7 @@
    in flathunter and in the webservice"""
 import re
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.abstract_processor import Processor
 
 class Filter(Processor):

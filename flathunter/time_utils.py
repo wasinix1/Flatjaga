@@ -3,7 +3,7 @@ from time import sleep
 from datetime import datetime
 from random import randint
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 
 
 def is_current_time_between(time_from, time_till):

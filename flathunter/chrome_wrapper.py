@@ -7,7 +7,7 @@ from typing import List
 from sys import platform
 import undetected_chromedriver as uc
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.exceptions import ChromeNotFound
 
 CHROME_VERSION_REGEXP = re.compile(r'.* (\d+\.\d+\.\d+\.\d+)( .*)?')

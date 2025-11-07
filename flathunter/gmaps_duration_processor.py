@@ -4,7 +4,7 @@ import time
 from urllib.parse import quote_plus
 import requests
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.abstract_processor import Processor
 
 class GMapsDurationProcessor(Processor):

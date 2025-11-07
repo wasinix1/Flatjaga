@@ -5,7 +5,7 @@ import time
 from itertools import chain
 import requests
 
-from flathunter.logging import logger, Colors
+from flathunter.logger_config import logger, Colors
 from flathunter.config import YamlConfig
 from flathunter.filter import Filter
 from flathunter.processor import ProcessorChain

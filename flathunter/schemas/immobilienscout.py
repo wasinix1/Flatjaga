@@ -9,7 +9,7 @@ from pydantic import (
     model_validator
 )
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 
 class ImmoscoutQuery(BaseModel):
     """Pydantic model to validate and transform an Immoscout search URL"""

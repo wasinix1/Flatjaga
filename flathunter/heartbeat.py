@@ -1,7 +1,7 @@
 """Providing heartbeat messages"""
 from flathunter.abstract_notifier import Notifier
 from flathunter.config import YamlConfig
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.notifiers import SenderApprise, SenderMattermost, SenderTelegram, SenderSlack
 from flathunter.exceptions import HeartbeatException
 

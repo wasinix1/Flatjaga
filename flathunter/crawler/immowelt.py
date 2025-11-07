@@ -5,7 +5,7 @@ import hashlib
 
 from bs4 import BeautifulSoup, Tag
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.abstract_crawler import Crawler
 
 class Immowelt(Crawler):

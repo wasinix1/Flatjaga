@@ -5,7 +5,7 @@ from flathunter.argument_parser import parse
 from flathunter.googlecloud_idmaintainer import GoogleCloudIdMaintainer
 from flathunter.web_hunter import WebHunter
 from flathunter.config import Config
-from flathunter.logging import configure_logging
+from flathunter.logger_config import configure_logging
 
 # load config
 args = parse()

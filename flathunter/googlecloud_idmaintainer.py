@@ -6,7 +6,7 @@ from firebase_admin import credentials
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_query import BaseQuery
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.exceptions import PersistenceException
 
 

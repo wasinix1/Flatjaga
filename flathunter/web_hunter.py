@@ -1,6 +1,6 @@
 """Flathunter implementation for website"""
 from flathunter.config import YamlConfig
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.hunter import Hunter
 from flathunter.filter import Filter
 from flathunter.processor import ProcessorChain

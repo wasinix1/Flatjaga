@@ -6,7 +6,7 @@ from time import sleep
 import backoff
 import requests
 
-from flathunter.logging import logger
+from flathunter.logger_config import logger
 from flathunter.captcha.captcha_solver import (
     CaptchaSolver,
     CaptchaUnsolvableError,
