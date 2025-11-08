@@ -7,6 +7,18 @@ import undetected_chromedriver as uc
 import random
 import time
 import logging
+import os
+
+# SSL FIX (before any HTTPS usage)
+try:
+    import certifi
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+except ImportError:
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
+except:
+    pass
 
 logger = logging.getLogger(__name__)
 
