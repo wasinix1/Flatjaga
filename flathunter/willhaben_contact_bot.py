@@ -394,6 +394,68 @@ class WillhabenContactBot:
             logger.error(f"Critical error in Mietprofil verification: {e}", exc_info=True)
             return False
 
+    def _verify_message_prefill(self, message_textarea, max_attempts=10):
+        """
+        Verify if message textarea has pre-filled content with 100% certainty.
+        Waits for React stability and checks multiple times to ensure accuracy.
+
+        Args:
+            message_textarea: WebElement of the textarea
+            max_attempts: Maximum number of verification attempts
+
+        Returns:
+            bool: True if pre-filled content is present, False if truly empty
+        """
+        try:
+            logger.debug("Verifying message pre-fill status...")
+
+            # Wait for React stability first
+            self._wait_for_react_stability(timeout=3.0)
+
+            # Scroll textarea into view
+            try:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});",
+                    message_textarea
+                )
+                time.sleep(0.2)
+            except Exception as e:
+                logger.debug(f"Scroll failed: {e} - continuing anyway")
+
+            # Multiple verification checks with different methods
+            for attempt in range(max_attempts):
+                # Method 1: Selenium getAttribute
+                value_attr = message_textarea.get_attribute("value") or ""
+
+                # Method 2: JavaScript .value property
+                value_js = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
+
+                # Method 3: JavaScript textContent
+                text_content = self.driver.execute_script("return arguments[0].textContent;", message_textarea) or ""
+
+                # Method 4: Selenium .text property
+                selenium_text = message_textarea.text or ""
+
+                # Check if any method found content
+                if value_attr.strip() or value_js.strip() or text_content.strip() or selenium_text.strip():
+                    logger.info(f"✓ Pre-filled message detected (attempt {attempt + 1}/{max_attempts})")
+                    logger.debug(f"  Content length: {max(len(value_attr), len(value_js), len(text_content), len(selenium_text))} chars")
+                    return True
+
+                # Wait before next check (with increasing intervals)
+                if attempt < max_attempts - 1:
+                    wait_time = 0.3 + (attempt * 0.1)  # 0.3s, 0.4s, 0.5s, etc.
+                    time.sleep(wait_time)
+
+            # After all attempts, confirmed empty
+            logger.info(f"✓ Confirmed: No pre-filled message (verified {max_attempts} times)")
+            return False
+
+        except Exception as e:
+            logger.warning(f"Error verifying message pre-fill: {e}")
+            # On error, assume empty to be safe (will fill with default)
+            return False
+
 
     def _handle_popups(self):
         """Handle any popups that might appear (cookies, privacy, security).
@@ -668,37 +730,25 @@ class WillhabenContactBot:
                         logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Check if textarea needs filling
-                    # Wait for pre-filled content to load (for logged-in users with saved messages)
+                    # Messaging form: Verify message field with 100% certainty
                     try:
                         message_textarea = self.driver.find_element(By.ID, "mailContent")
                         if message_textarea:
-                            # Smart wait: Check for pre-filled content (max 5 attempts over ~1.5s)
-                            has_content = False
-                            for check_attempt in range(5):
-                                existing_value = message_textarea.get_attribute("value") or ""
-                                existing_text = self.driver.execute_script("return arguments[0].value;", message_textarea) or ""
+                            # Use robust verification with React stability check
+                            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
 
-                                if existing_value.strip() or existing_text.strip():
-                                    has_content = True
-                                    logger.info(f"✓ Pre-filled message detected (check #{check_attempt+1})")
-                                    break
-
-                                # Quick delay between checks (total ~1.5s max if no content found)
-                                if check_attempt < 4:
-                                    time.sleep(0.3)
-
-                            if has_content:
-                                logger.info("Using pre-saved message template")
+                            if has_prefill:
+                                logger.info("✅ Using pre-filled message template")
                                 self._random_delay(0.1, 0.2)
                             else:
-                                # No pre-filled content found after waiting - fill with default
+                                # Confirmed empty after multiple checks - fill with default
+                                logger.info("Filling message field with default text...")
                                 message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
                                 message_textarea.send_keys(message_text)
-                                logger.warning("No pre-filled message found - using default message")
+                                logger.info("✓ Message field filled with default text")
                                 self._random_delay(0.1, 0.3)
                     except Exception as e:
-                        logger.debug(f"Could not check/fill message field: {e}")
+                        logger.warning(f"Error handling message field: {e}")
 
                     # Find submit button
                     try:
