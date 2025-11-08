@@ -28,34 +28,42 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, use_stealth=False):
         """
-        Initialize the bot with Chrome WebDriver
-        Initialize the bot with Stealth Chrome WebDriver
+        Initialize the bot with Chrome WebDriver or StealthDriver
 
         Args:
             headless: Run Chrome in headless mode (no visible browser)
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
+            use_stealth: Use StealthDriver with undetected-chromedriver (default: False)
         """
-        self.options = webdriver.ChromeOptions()
+        self.headless = headless
         self.delay_min = delay_min
         self.delay_max = delay_max
-
-        if headless:
-            self.options.add_argument('--headless')
-
-        # Make it look more like a real browser
-        self.options.add_argument('--disable-blink-features=AutomationControlled')
-        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        self.options.add_experimental_option('useAutomationExtension', False)
-
-        self.headless = headless
+        self.use_stealth = use_stealth
         self.driver = None
+        self.stealth_driver = None  # For StealthDriver wrapper
+
+        # Setup options for regular Chrome
+        self.options = webdriver.ChromeOptions()
+
+        if not use_stealth:
+            # Regular Chrome setup
+            if headless:
+                self.options.add_argument('--headless')
+
+            # Basic stealth features (always enabled)
+            self.options.add_argument('--disable-blink-features=AutomationControlled')
+            self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            self.options.add_experimental_option('useAutomationExtension', False)
+
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
         self.contacted_file = Path.home() / '.willhaben_contacted.json'
         self.contacted_listings = self._load_contacted_listings()
-        logger.info("Willhaben bot initialized")
+
+        stealth_mode = "stealth" if use_stealth else "standard"
+        logger.info(f"Willhaben bot initialized (mode: {stealth_mode}, headless: {headless})")
     
     def _load_contacted_listings(self):
         """Load the list of already contacted listing IDs"""
@@ -82,7 +90,12 @@ class WillhabenContactBot:
         if max_sec is None:
             max_sec = self.delay_max
 
-        time.sleep(random.uniform(min_sec, max_sec))
+        if self.use_stealth and self.stealth_driver:
+            # Use StealthDriver's smart delay (includes random pauses)
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            # Standard random delay
+            time.sleep(random.uniform(min_sec, max_sec))
     
     def _try_click_element(self, element, description="element"):
         """Try multiple strategies to click an element.
@@ -456,6 +469,47 @@ class WillhabenContactBot:
             # On error, assume empty to be safe (will fill with default)
             return False
 
+    def _ensure_message_filled(self):
+        """
+        Ensure message textarea is filled before submission.
+        Production-ready orchestration: find → verify → fill if needed.
+        BEST EFFORT - tries hard but won't block submission on failure.
+
+        Returns:
+            True if message field has content (pre-filled or filled), False otherwise
+        """
+        try:
+            logger.info("🔍 Verifying message field...")
+
+            # Step 1: Find the message textarea
+            try:
+                message_textarea = self.driver.find_element(By.ID, "mailContent")
+            except Exception as e:
+                logger.warning(f"⚠️  Message textarea not found: {e}")
+                return False
+
+            # Step 2: Verify if pre-filled (with React stability check)
+            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
+
+            if has_prefill:
+                logger.info("✅ Using pre-filled message template")
+                return True
+
+            # Step 3: No pre-fill - fill with default text
+            logger.info("Filling message field with default text...")
+            try:
+                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                message_textarea.send_keys(message_text)
+                logger.info("✅ Message field filled with default text")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Failed to fill message field: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Critical error in message field verification: {e}", exc_info=True)
+            return False
+
 
     def _handle_popups(self):
         """Handle any popups that might appear (cookies, privacy, security).
@@ -514,17 +568,37 @@ class WillhabenContactBot:
         return self._handle_popups()
     
     def start(self):
-        """Start the Chrome WebDriver"""
-        self.driver = webdriver.Chrome(options=self.options)
+        """Start the Chrome WebDriver (regular or stealth)"""
+        if self.use_stealth:
+            # Use StealthDriver
+            from flathunter.stealth_driver import StealthDriver
+            self.stealth_driver = StealthDriver(headless=self.headless)
+            self.stealth_driver.start()
+            self.driver = self.stealth_driver.driver
+            logger.info("Stealth browser started for Willhaben")
+        else:
+            # Use regular Chrome
+            self.driver = webdriver.Chrome(options=self.options)
+            logger.info("Browser started for Willhaben")
+
         self.wait = WebDriverWait(self.driver, 10)  # Default 10s timeout
         print("✓ Browser started")
-        logger.info("Browser started for Willhaben")
     
     def close(self):
         """Close the browser with timeout to prevent hanging"""
         if not self.driver:
             return
 
+        if self.use_stealth and self.stealth_driver:
+            # Use StealthDriver's quit method
+            try:
+                self.stealth_driver.quit()
+                print("✓ Browser closed")
+            except Exception as e:
+                logger.error(f"Error closing stealth browser: {e}")
+            return
+
+        # Regular Chrome cleanup with timeout protection
         def timeout_handler(signum, frame):
             raise TimeoutError("Browser quit() operation timed out")
 
@@ -730,27 +804,7 @@ class WillhabenContactBot:
                         logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Verify message field with 100% certainty
-                    try:
-                        message_textarea = self.driver.find_element(By.ID, "mailContent")
-                        if message_textarea:
-                            # Use robust verification with React stability check
-                            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
-
-                            if has_prefill:
-                                logger.info("✅ Using pre-filled message template")
-                                self._random_delay(0.1, 0.2)
-                            else:
-                                # Confirmed empty after multiple checks - fill with default
-                                logger.info("Filling message field with default text...")
-                                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
-                                message_textarea.send_keys(message_text)
-                                logger.info("✓ Message field filled with default text")
-                                self._random_delay(0.1, 0.3)
-                    except Exception as e:
-                        logger.warning(f"Error handling message field: {e}")
-
-                    # Find submit button
+                    # Messaging form: Find submit button only
                     try:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
@@ -767,9 +821,10 @@ class WillhabenContactBot:
                 logger.error(f"Could not find submit button after {max_attempts} attempts (form_type={form_type})")
                 return False
 
-            # Final check: Ensure Mietprofil is checked before submission (email forms only)
-            # BEST EFFORT - we try to check it, but don't block submission if it fails
+            # Final verification before submission - form type specific
+            # BEST EFFORT - we try to verify/prepare, but don't block submission if it fails
             if form_type == "email":
+                # Email forms: Verify Mietprofil checkbox
                 logger.info("Verifying Mietprofil checkbox before submission...")
                 checkbox_result = self._ensure_mietprofil_checked()
                 if checkbox_result:
@@ -777,6 +832,16 @@ class WillhabenContactBot:
                 else:
                     logger.warning("⚠️ Mietprofil checkbox verification failed - continuing with submission anyway")
                     logger.warning("The message will still be sent, but may not include tenant profile")
+
+            elif form_type == "messaging":
+                # Messaging forms: Verify message field
+                logger.info("Verifying message field before submission...")
+                message_result = self._ensure_message_filled()
+                if message_result:
+                    logger.info("✅ Message field verified and ready")
+                else:
+                    logger.warning("⚠️ Message field verification failed - continuing with submission anyway")
+                    logger.warning("The message may be empty or invalid")
 
             # Submit the form with multiple click strategies
             logger.info(f"Submitting form (type: {form_type})")

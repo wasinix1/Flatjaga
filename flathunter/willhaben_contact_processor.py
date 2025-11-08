@@ -30,6 +30,7 @@ class WillhabenContactProcessor:
         self.headless = config.get('willhaben_headless', True)
         self.delay_min = config.get('willhaben_delay_min', 0.5)
         self.delay_max = config.get('willhaben_delay_max', 2.0)
+        self.use_stealth = config.get('willhaben_stealth_mode', False)
 
         # Track headless mode for fallback
         self.headless_original = self.headless  # Remember original setting
@@ -38,7 +39,8 @@ class WillhabenContactProcessor:
         # Setup failure log file
         self.failure_log_file = Path.home() / '.willhaben_contact_failures.jsonl'
 
-        logger.info(f"Willhaben auto-contact processor initialized (with auto-recovery, headless={self.headless}, title cross-ref enabled, session tracking enabled)")
+        stealth_info = "stealth=ON" if self.use_stealth else "stealth=OFF"
+        logger.info(f"Willhaben auto-contact processor initialized (with auto-recovery, headless={self.headless}, {stealth_info}, title cross-ref enabled, session tracking enabled)")
 
     def _log_failure_to_file(self, expose, error_message, error_type="unknown"):
         """Log contact failure to file with timestamp and details"""
@@ -156,11 +158,12 @@ class WillhabenContactProcessor:
             delay_max = self.delay_max
 
         try:
-            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s)...")
+            logger.info(f"Starting willhaben contact bot (headless={headless_mode}, delays={delay_min}-{delay_max}s, stealth={self.use_stealth})...")
             self.bot = WillhabenContactBot(
                 headless=headless_mode,
                 delay_min=delay_min,
-                delay_max=delay_max
+                delay_max=delay_max,
+                use_stealth=self.use_stealth
             )
             self.bot.start()
 
@@ -235,7 +238,8 @@ class WillhabenContactProcessor:
             temp_bot = WillhabenContactBot(
                 headless=False,
                 delay_min=self.delay_min,
-                delay_max=self.delay_max
+                delay_max=self.delay_max,
+                use_stealth=self.use_stealth
             )
             temp_bot.start()
 
