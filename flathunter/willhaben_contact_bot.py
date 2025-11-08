@@ -116,65 +116,57 @@ class WillhabenContactBot:
         logger.warning(f"✗ All click strategies failed for {description}")
         return False
 
-    def _debug_log_element(self, element, description="element"):
+    def _wait_for_react_stability(self, timeout=3.0):
         """
-        Log comprehensive debug information about an element.
+        Wait for React components to stabilize before interacting with the form.
+        Monitors DOM mutations and waits for them to settle.
 
         Args:
-            element: Selenium WebElement to debug
-            description: Description for logging
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if stable, False if timeout
         """
         try:
-            logger.debug(f"=== DEBUG INFO FOR {description.upper()} ===")
+            stability_script = """
+            return new Promise((resolve) => {
+                let timeoutId;
+                const observer = new MutationObserver(() => {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        observer.disconnect();
+                        resolve(true);
+                    }, 300);
+                });
 
-            # Basic attributes
-            logger.debug(f"  Tag: {element.tag_name}")
-            logger.debug(f"  ID: {element.get_attribute('id') or 'N/A'}")
-            logger.debug(f"  Name: {element.get_attribute('name') or 'N/A'}")
-            logger.debug(f"  Type: {element.get_attribute('type') or 'N/A'}")
-            logger.debug(f"  Class: {element.get_attribute('class') or 'N/A'}")
-            logger.debug(f"  Data-testid: {element.get_attribute('data-testid') or 'N/A'}")
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true
+                });
 
-            # State
-            logger.debug(f"  Displayed: {element.is_displayed()}")
-            logger.debug(f"  Enabled: {element.is_enabled()}")
-            logger.debug(f"  Selected: {element.is_selected()}")
+                // Initial timeout
+                timeoutId = setTimeout(() => {
+                    observer.disconnect();
+                    resolve(true);
+                }, 300);
 
-            # Position & Size
-            location = element.location
-            size = element.size
-            logger.debug(f"  Location: x={location['x']}, y={location['y']}")
-            logger.debug(f"  Size: width={size['width']}, height={size['height']}")
-
-            # Checked property (for checkboxes)
-            checked_prop = self.driver.execute_script("return arguments[0].checked;", element)
-            logger.debug(f"  Checked property (JS): {checked_prop}")
-
-            # HTML structure
-            outer_html = self.driver.execute_script("return arguments[0].outerHTML;", element)
-            logger.debug(f"  HTML: {outer_html[:200]}...")
-
-            # Computed CSS
-            display = self.driver.execute_script("return window.getComputedStyle(arguments[0]).display;", element)
-            visibility = self.driver.execute_script("return window.getComputedStyle(arguments[0]).visibility;", element)
-            opacity = self.driver.execute_script("return window.getComputedStyle(arguments[0]).opacity;", element)
-            pointer_events = self.driver.execute_script("return window.getComputedStyle(arguments[0]).pointerEvents;", element)
-            logger.debug(f"  CSS display: {display}")
-            logger.debug(f"  CSS visibility: {visibility}")
-            logger.debug(f"  CSS opacity: {opacity}")
-            logger.debug(f"  CSS pointer-events: {pointer_events}")
-
-            # Parent info
-            parent = self.driver.execute_script("return arguments[0].parentElement;", element)
-            if parent:
-                parent_tag = self.driver.execute_script("return arguments[0].tagName;", parent)
-                parent_class = self.driver.execute_script("return arguments[0].className;", parent)
-                logger.debug(f"  Parent: <{parent_tag}> class='{parent_class}'")
-
-            logger.debug(f"=== END DEBUG INFO ===")
-
+                // Safety timeout
+                setTimeout(() => {
+                    observer.disconnect();
+                    resolve(false);
+                }, arguments[0] * 1000);
+            });
+            """
+            result = self.driver.execute_async_script(stability_script, timeout)
+            if result:
+                logger.debug("✓ React components stabilized")
+            else:
+                logger.debug("React stability timeout - proceeding anyway")
+            return result
         except Exception as e:
-            logger.error(f"Error logging debug info for {description}: {e}")
+            logger.debug(f"React stability check failed: {e} - proceeding anyway")
+            return False
 
     def _get_mietprofil_checkbox(self, timeout=5):
         """
@@ -198,33 +190,149 @@ class WillhabenContactBot:
             logger.debug(f"Error finding Mietprofil checkbox: {e}")
             return None
 
-    def _is_mietprofil_checked(self):
+    def _verify_mietprofil_state(self):
         """
-        Check if Mietprofil sharing checkbox is currently checked.
+        Verify Mietprofil checkbox state using both DOM and FormData.
+        FormData is what actually gets submitted - this is the source of truth.
 
         Returns:
-            True if checked, False if unchecked or not found
+            Tuple[bool, bool]: (is_checked_in_formdata, needs_manual_check)
+            - is_checked_in_formdata: True if checkbox is in FormData (will be submitted)
+            - needs_manual_check: True if state couldn't be determined reliably
         """
+        verify_script = """
+        const checkbox = document.evaluate(
+            "//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']",
+            document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+        ).singleNodeValue;
+
+        if (!checkbox) return {error: "not_found"};
+
+        const form = checkbox.closest('form');
+        if (!form) return {error: "no_form"};
+
+        const formData = new FormData(form);
+        const inFormData = formData.has(checkbox.name);
+
+        return {
+            dom_checked: checkbox.checked,
+            in_formdata: inFormData,
+            checkbox_name: checkbox.name
+        };
+        """
+
         try:
-            checkbox = self._get_mietprofil_checkbox(timeout=3)
-            if checkbox is None:
-                return False
+            result = self.driver.execute_script(verify_script)
 
-            # Use both Selenium and JavaScript to verify
-            is_selected = checkbox.is_selected()
-            is_checked_js = self.driver.execute_script("return arguments[0].checked;", checkbox)
+            if result.get('error'):
+                logger.debug(f"Mietprofil checkbox check: {result.get('error')}")
+                return False, True  # Not found, needs manual verification
 
-            logger.debug(f"Checkbox state: is_selected()={is_selected}, JS checked={is_checked_js}")
-            return is_selected or is_checked_js
+            dom_checked = result.get('dom_checked')
+            in_formdata = result.get('in_formdata')
+
+            logger.info(f"Mietprofil state: DOM={dom_checked}, FormData={in_formdata}")
+
+            # IDEAL: Both true (logged-in user with profile)
+            if dom_checked and in_formdata:
+                logger.info("✓ Mietprofil checked and in FormData")
+                return True, False
+
+            # BAD: Not in FormData (even if DOM shows checked)
+            if not in_formdata:
+                logger.warning("⚠️  Mietprofil NOT in FormData - profile won't be shared")
+                return False, True
+
+            # EDGE: In FormData but DOM unchecked (shouldn't happen)
+            return in_formdata, False
 
         except Exception as e:
-            logger.debug(f"Error checking Mietprofil state: {e}")
-            return False
+            logger.warning(f"Error verifying Mietprofil state: {e}")
+            return False, True  # Error, needs manual verification
+
+    def _apply_js_event_strategy(self):
+        """
+        Apply JS full event simulation strategy to check the Mietprofil checkbox.
+        Simulates complete mouse interaction with proper event bubbling.
+        """
+        try:
+            self.driver.execute_script("""
+                const checkbox = document.evaluate(
+                    "//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']",
+                    document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                ).singleNodeValue;
+
+                if (checkbox) {
+                    const events = [
+                        new MouseEvent('mousedown', {bubbles: true, cancelable: true, view: window}),
+                        new MouseEvent('mouseup', {bubbles: true, cancelable: true, view: window}),
+                        new MouseEvent('click', {bubbles: true, cancelable: true, view: window}),
+                    ];
+
+                    events.forEach(event => checkbox.dispatchEvent(event));
+                    checkbox.dispatchEvent(new Event('change', {bubbles: true}));
+                    checkbox.dispatchEvent(new Event('input', {bubbles: true}));
+                }
+            """)
+            logger.debug("Applied JS event simulation strategy")
+        except Exception as e:
+            logger.debug(f"JS event strategy failed: {e}")
+            raise
+
+    def _apply_selenium_actions_strategy(self):
+        """
+        Apply Selenium ActionChains strategy to check the Mietprofil checkbox.
+        Uses native Selenium interaction for maximum compatibility.
+        """
+        try:
+            checkbox = self.driver.find_element(By.XPATH,
+                "//label[.//span[contains(text(), 'Mietprofil teilen')]]/input[@type='checkbox']")
+
+            actions = ActionChains(self.driver)
+            actions.move_to_element(checkbox).click().perform()
+            logger.debug("Applied Selenium ActionChains strategy")
+        except Exception as e:
+            logger.debug(f"Selenium actions strategy failed: {e}")
+            raise
+
+    def _attempt_mietprofil_check(self):
+        """
+        Attempt to check the Mietprofil checkbox using proven strategies.
+        Tries JS event simulation first, then Selenium actions as fallback.
+
+        Returns:
+            True if checkbox is successfully checked, False otherwise
+        """
+        strategies = [
+            ("JS Full Event Simulation", self._apply_js_event_strategy),
+            ("Selenium ActionChains", self._apply_selenium_actions_strategy)
+        ]
+
+        for strategy_name, strategy_func in strategies:
+            logger.info(f"Attempting: {strategy_name}")
+
+            try:
+                strategy_func()
+                time.sleep(1.0)  # Wait for React to update
+
+                # Verify it worked
+                is_checked, _ = self._verify_mietprofil_state()
+                if is_checked:
+                    logger.info(f"✓ Success with: {strategy_name}")
+                    return True
+                else:
+                    logger.warning(f"Strategy '{strategy_name}' executed but checkbox still not checked")
+            except Exception as e:
+                logger.warning(f"Strategy '{strategy_name}' failed: {e}")
+                continue
+
+        logger.error("All strategies failed to check Mietprofil")
+        return False
 
     def _ensure_mietprofil_checked(self):
         """
         Ensure Mietprofil checkbox is checked before submission.
-        Uses multiple strategies with detailed logging.
+        Production-ready orchestration: stabilize → scroll → verify → check → verify.
         BEST EFFORT - tries hard but won't block submission on failure.
 
         Returns:
@@ -233,67 +341,53 @@ class WillhabenContactBot:
         try:
             logger.info("🔍 Verifying Mietprofil checkbox...")
 
-            # Step 1: Find the checkbox
+            # Step 1: Wait for React components to stabilize
+            logger.debug("Waiting for React stability...")
+            self._wait_for_react_stability(timeout=3.0)
+
+            # Step 2: Find the checkbox
             checkbox = self._get_mietprofil_checkbox(timeout=5)
             if checkbox is None:
                 logger.warning("⚠️  Mietprofil checkbox not found (form may not have it)")
                 return False
 
-            # Step 2: Log debug info about the checkbox
-            self._debug_log_element(checkbox, "Mietprofil checkbox")
+            # Step 3: Scroll checkbox into view
+            logger.debug("Scrolling checkbox into view...")
+            try:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});",
+                    checkbox
+                )
+                time.sleep(0.3)  # Allow smooth scroll to complete
+            except Exception as e:
+                logger.debug(f"Scroll failed: {e} - continuing anyway")
 
-            # Step 3: Check if already checked
-            if self._is_mietprofil_checked():
-                logger.info("✅ Mietprofil already checked")
+            # Step 4: Verify current state
+            is_checked, needs_check = self._verify_mietprofil_state()
+
+            if is_checked:
+                logger.info("✅ Mietprofil already checked and in FormData")
                 return True
 
-            # Step 4: Not checked - try to check it with multiple strategies
+            if not needs_check:
+                # State is clear but checkbox is not checked - this shouldn't happen
+                logger.warning("Unexpected state: clear but not checked - will attempt to check")
+
+            # Step 5: Checkbox not checked - attempt to check it
             logger.warning("⚠️  Mietprofil NOT checked - attempting to check it...")
 
-            # Get the parent label
-            label = self.driver.execute_script("return arguments[0].parentElement;", checkbox)
-            if label:
-                self._debug_log_element(label, "Mietprofil label")
+            # Only attempt if we're certain it needs checking
+            if needs_check or not is_checked:
+                success = self._attempt_mietprofil_check()
 
-            # Try multiple strategies to check the checkbox
-            strategies = [
-                ("Click label (regular)", lambda: label.click() if label else None),
-                ("Click label (JS)", lambda: self.driver.execute_script("arguments[0].click();", label) if label else None),
-                ("Click checkbox (regular)", lambda: checkbox.click()),
-                ("Click checkbox (JS)", lambda: self.driver.execute_script("arguments[0].click();", checkbox)),
-                ("Set checked=true (JS)", lambda: self.driver.execute_script("arguments[0].checked = true;", checkbox)),
-                ("Set checked + events (JS)", lambda: self.driver.execute_script("""
-                    arguments[0].checked = true;
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                    arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
-                """, checkbox)),
-                ("Send SPACE key", lambda: checkbox.send_keys(Keys.SPACE)),
-                ("ActionChains click", lambda: ActionChains(self.driver).move_to_element(checkbox).click().perform()),
-                ("Scroll + click label", lambda: (
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", label),
-                    time.sleep(0.2),
-                    label.click()
-                ) if label else None),
-            ]
+                if success:
+                    logger.info("✅ Mietprofil successfully checked")
+                    return True
+                else:
+                    logger.error("❌ Failed to check Mietprofil checkbox")
+                    return False
 
-            for i, (name, func) in enumerate(strategies, 1):
-                try:
-                    logger.info(f"  Strategy {i}/{len(strategies)}: {name}")
-                    func()
-                    time.sleep(0.4)  # Wait for React updates
-
-                    # Verify if it worked
-                    if self._is_mietprofil_checked():
-                        logger.info(f"✅ SUCCESS with strategy: {name}")
-                        return True
-                    else:
-                        logger.debug(f"  ❌ {name} - checkbox still not checked")
-
-                except Exception as e:
-                    logger.debug(f"  ❌ {name} failed: {e}")
-
-            # All strategies failed
-            logger.error("❌ All strategies failed - checkbox not checked")
+            # Shouldn't reach here, but default to False
             return False
 
         except Exception as e:
