@@ -456,6 +456,47 @@ class WillhabenContactBot:
             # On error, assume empty to be safe (will fill with default)
             return False
 
+    def _ensure_message_filled(self):
+        """
+        Ensure message textarea is filled before submission.
+        Production-ready orchestration: find → verify → fill if needed.
+        BEST EFFORT - tries hard but won't block submission on failure.
+
+        Returns:
+            True if message field has content (pre-filled or filled), False otherwise
+        """
+        try:
+            logger.info("🔍 Verifying message field...")
+
+            # Step 1: Find the message textarea
+            try:
+                message_textarea = self.driver.find_element(By.ID, "mailContent")
+            except Exception as e:
+                logger.warning(f"⚠️  Message textarea not found: {e}")
+                return False
+
+            # Step 2: Verify if pre-filled (with React stability check)
+            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
+
+            if has_prefill:
+                logger.info("✅ Using pre-filled message template")
+                return True
+
+            # Step 3: No pre-fill - fill with default text
+            logger.info("Filling message field with default text...")
+            try:
+                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                message_textarea.send_keys(message_text)
+                logger.info("✅ Message field filled with default text")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Failed to fill message field: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Critical error in message field verification: {e}", exc_info=True)
+            return False
+
 
     def _handle_popups(self):
         """Handle any popups that might appear (cookies, privacy, security).
@@ -730,27 +771,7 @@ class WillhabenContactBot:
                         logger.debug(f"Could not find email submit button yet: {e}")
 
                 elif form_found and form_type == "messaging":
-                    # Messaging form: Verify message field with 100% certainty
-                    try:
-                        message_textarea = self.driver.find_element(By.ID, "mailContent")
-                        if message_textarea:
-                            # Use robust verification with React stability check
-                            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
-
-                            if has_prefill:
-                                logger.info("✅ Using pre-filled message template")
-                                self._random_delay(0.1, 0.2)
-                            else:
-                                # Confirmed empty after multiple checks - fill with default
-                                logger.info("Filling message field with default text...")
-                                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
-                                message_textarea.send_keys(message_text)
-                                logger.info("✓ Message field filled with default text")
-                                self._random_delay(0.1, 0.3)
-                    except Exception as e:
-                        logger.warning(f"Error handling message field: {e}")
-
-                    # Find submit button
+                    # Messaging form: Find submit button only
                     try:
                         submit_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="ad-request-send-message"]')
                         if submit_button and submit_button.is_displayed() and submit_button.is_enabled():
@@ -767,9 +788,10 @@ class WillhabenContactBot:
                 logger.error(f"Could not find submit button after {max_attempts} attempts (form_type={form_type})")
                 return False
 
-            # Final check: Ensure Mietprofil is checked before submission (email forms only)
-            # BEST EFFORT - we try to check it, but don't block submission if it fails
+            # Final verification before submission - form type specific
+            # BEST EFFORT - we try to verify/prepare, but don't block submission if it fails
             if form_type == "email":
+                # Email forms: Verify Mietprofil checkbox
                 logger.info("Verifying Mietprofil checkbox before submission...")
                 checkbox_result = self._ensure_mietprofil_checked()
                 if checkbox_result:
@@ -777,6 +799,16 @@ class WillhabenContactBot:
                 else:
                     logger.warning("⚠️ Mietprofil checkbox verification failed - continuing with submission anyway")
                     logger.warning("The message will still be sent, but may not include tenant profile")
+
+            elif form_type == "messaging":
+                # Messaging forms: Verify message field
+                logger.info("Verifying message field before submission...")
+                message_result = self._ensure_message_filled()
+                if message_result:
+                    logger.info("✅ Message field verified and ready")
+                else:
+                    logger.warning("⚠️ Message field verification failed - continuing with submission anyway")
+                    logger.warning("The message may be empty or invalid")
 
             # Submit the form with multiple click strategies
             logger.info(f"Submitting form (type: {form_type})")
