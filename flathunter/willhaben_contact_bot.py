@@ -66,7 +66,8 @@ class WillhabenContactBot:
 
             # Basic stealth features (always enabled)
             self.options.add_argument('--disable-blink-features=AutomationControlled')
-            self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            # Note: excludeSwitches removed for compatibility with older ChromeDriver versions
+            # self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
             self.options.add_experimental_option('useAutomationExtension', False)
 
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
