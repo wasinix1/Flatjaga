@@ -19,6 +19,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 
+# SSL FIX (before any HTTPS usage)
+try:
+    import certifi
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+except ImportError:
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
+except:
+    pass
+
 logger = logging.getLogger(__name__)
 
 COOKIE_FILE = str(Path.home() / '.wg_gesucht_cookies.json')
