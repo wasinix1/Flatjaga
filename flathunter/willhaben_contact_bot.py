@@ -28,34 +28,42 @@ class SessionExpiredException(Exception):
 
 
 class WillhabenContactBot:
-    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0):
+    def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, use_stealth=False):
         """
-        Initialize the bot with Chrome WebDriver
-        Initialize the bot with Stealth Chrome WebDriver
+        Initialize the bot with Chrome WebDriver or StealthDriver
 
         Args:
             headless: Run Chrome in headless mode (no visible browser)
             delay_min: Minimum delay between actions in seconds
             delay_max: Maximum delay between actions in seconds
+            use_stealth: Use StealthDriver with undetected-chromedriver (default: False)
         """
-        self.options = webdriver.ChromeOptions()
+        self.headless = headless
         self.delay_min = delay_min
         self.delay_max = delay_max
-
-        if headless:
-            self.options.add_argument('--headless')
-
-        # Make it look more like a real browser
-        self.options.add_argument('--disable-blink-features=AutomationControlled')
-        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        self.options.add_experimental_option('useAutomationExtension', False)
-
-        self.headless = headless
+        self.use_stealth = use_stealth
         self.driver = None
+        self.stealth_driver = None  # For StealthDriver wrapper
+
+        # Setup options for regular Chrome
+        self.options = webdriver.ChromeOptions()
+
+        if not use_stealth:
+            # Regular Chrome setup
+            if headless:
+                self.options.add_argument('--headless')
+
+            # Basic stealth features (always enabled)
+            self.options.add_argument('--disable-blink-features=AutomationControlled')
+            self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            self.options.add_experimental_option('useAutomationExtension', False)
+
         self.cookies_file = Path.home() / '.willhaben_cookies.json'
         self.contacted_file = Path.home() / '.willhaben_contacted.json'
         self.contacted_listings = self._load_contacted_listings()
-        logger.info("Willhaben bot initialized")
+
+        stealth_mode = "stealth" if use_stealth else "standard"
+        logger.info(f"Willhaben bot initialized (mode: {stealth_mode}, headless: {headless})")
     
     def _load_contacted_listings(self):
         """Load the list of already contacted listing IDs"""
@@ -82,7 +90,12 @@ class WillhabenContactBot:
         if max_sec is None:
             max_sec = self.delay_max
 
-        time.sleep(random.uniform(min_sec, max_sec))
+        if self.use_stealth and self.stealth_driver:
+            # Use StealthDriver's smart delay (includes random pauses)
+            self.stealth_driver.smart_delay(min_sec, max_sec)
+        else:
+            # Standard random delay
+            time.sleep(random.uniform(min_sec, max_sec))
     
     def _try_click_element(self, element, description="element"):
         """Try multiple strategies to click an element.
@@ -555,17 +568,37 @@ class WillhabenContactBot:
         return self._handle_popups()
     
     def start(self):
-        """Start the Chrome WebDriver"""
-        self.driver = webdriver.Chrome(options=self.options)
+        """Start the Chrome WebDriver (regular or stealth)"""
+        if self.use_stealth:
+            # Use StealthDriver
+            from flathunter.stealth_driver import StealthDriver
+            self.stealth_driver = StealthDriver(headless=self.headless)
+            self.stealth_driver.start()
+            self.driver = self.stealth_driver.driver
+            logger.info("Stealth browser started for Willhaben")
+        else:
+            # Use regular Chrome
+            self.driver = webdriver.Chrome(options=self.options)
+            logger.info("Browser started for Willhaben")
+
         self.wait = WebDriverWait(self.driver, 10)  # Default 10s timeout
         print("✓ Browser started")
-        logger.info("Browser started for Willhaben")
     
     def close(self):
         """Close the browser with timeout to prevent hanging"""
         if not self.driver:
             return
 
+        if self.use_stealth and self.stealth_driver:
+            # Use StealthDriver's quit method
+            try:
+                self.stealth_driver.quit()
+                print("✓ Browser closed")
+            except Exception as e:
+                logger.error(f"Error closing stealth browser: {e}")
+            return
+
+        # Regular Chrome cleanup with timeout protection
         def timeout_handler(signum, frame):
             raise TimeoutError("Browser quit() operation timed out")
 
