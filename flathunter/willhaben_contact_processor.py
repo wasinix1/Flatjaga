@@ -4,7 +4,7 @@ Detects browser crashes and restarts automatically
 """
 
 from flathunter.logger_config import logger
-from flathunter.willhaben_contact_bot import WillhabenContactBot, SessionExpiredException
+from flathunter.willhaben_contact_bot import WillhabenContactBot, SessionExpiredException, AlreadyContactedException
 from flathunter.session_manager import SessionManager
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
@@ -415,6 +415,17 @@ class WillhabenContactProcessor:
                         # Not a success - continue to next attempt
                         continue
 
+                except AlreadyContactedException as e:
+                    # Already contacted - this is expected behavior, not an error
+                    elapsed = time.time() - start_time
+                    logger.info(f"Already contacted - skipping without retry ({elapsed:.1f}s)")
+                    expose['_auto_contacted'] = False
+
+                    # Exit all retry loops immediately - this is not an error
+                    browser_session = 999  # Break outer loop
+                    tried_non_headless = True  # Skip headless fallback
+                    break
+
                 except SessionExpiredException as e:
                     elapsed = time.time() - start_time
                     self.total_errors += 1
@@ -524,6 +535,13 @@ class WillhabenContactProcessor:
                         expose['_auto_contacted'] = False
                         # Now send notifications since all retry options exhausted
                         self._send_failure_notification(expose, "Fehler auch mit sichtbarem Browser")
+
+                except AlreadyContactedException as e:
+                    # Already contacted - this is expected behavior, not an error
+                    elapsed = time.time() - start_time
+                    logger.info(f"Already contacted in non-headless mode - skipping ({elapsed:.1f}s)")
+                    expose['_auto_contacted'] = False
+                    # No notification needed - this is expected
 
                 except SessionExpiredException as e:
                     elapsed = time.time() - start_time
