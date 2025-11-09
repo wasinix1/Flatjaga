@@ -238,10 +238,22 @@ class WillhabenContactBot:
         const formData = new FormData(form);
         const inFormData = formData.has(checkbox.name);
 
+        // Additional debugging info
+        let formDataValue = null;
+        for (let [key, value] of formData.entries()) {
+            if (key === checkbox.name) {
+                formDataValue = value;
+                break;
+            }
+        }
+
         return {
             dom_checked: checkbox.checked,
             in_formdata: inFormData,
-            checkbox_name: checkbox.name
+            checkbox_name: checkbox.name,
+            checkbox_id: checkbox.id,
+            checkbox_value: checkbox.value,
+            formdata_value: formDataValue
         };
         """
 
@@ -254,21 +266,29 @@ class WillhabenContactBot:
 
             dom_checked = result.get('dom_checked')
             in_formdata = result.get('in_formdata')
+            checkbox_name = result.get('checkbox_name')
+            checkbox_id = result.get('checkbox_id')
+            formdata_value = result.get('formdata_value')
 
             logger.info(f"Mietprofil state: DOM={dom_checked}, FormData={in_formdata}")
+            logger.debug(f"  Checkbox details: name='{checkbox_name}', id='{checkbox_id}', formdata_value={formdata_value}")
 
-            # IDEAL: Both true (logged-in user with profile)
-            if dom_checked and in_formdata:
-                logger.info("✓ Mietprofil checked and in FormData")
+            # IMPORTANT: DOM checked is what matters for checkboxes!
+            # FormData for checkboxes can be unreliable - if DOM shows checked, trust it
+            if dom_checked:
+                if in_formdata:
+                    logger.info("✓ Mietprofil checked (DOM + FormData both confirm)")
+                else:
+                    logger.info("✓ Mietprofil checked (DOM confirms, FormData may update on submit)")
                 return True, False
 
-            # BAD: Not in FormData (even if DOM shows checked)
-            if not in_formdata:
-                logger.warning("⚠️  Mietprofil NOT in FormData - profile won't be shared")
+            # DOM shows unchecked - definitely not checked
+            if not dom_checked:
+                logger.warning("⚠️  Mietprofil NOT checked (DOM confirms)")
                 return False, True
 
-            # EDGE: In FormData but DOM unchecked (shouldn't happen)
-            return in_formdata, False
+            # Shouldn't reach here
+            return False, True
 
         except Exception as e:
             logger.warning(f"Error verifying Mietprofil state: {e}")
@@ -832,20 +852,20 @@ class WillhabenContactBot:
                 logger.error(f"Could not find submit button after {max_attempts} attempts (form_type={form_type})")
                 return False
 
-            # Final verification before submission - form type specific
+            # Final verification before submission
             # BEST EFFORT - we try to verify/prepare, but don't block submission if it fails
-            if form_type == "email":
-                # Email forms: Verify Mietprofil checkbox
-                logger.info("Verifying Mietprofil checkbox before submission...")
-                checkbox_result = self._ensure_mietprofil_checked()
-                if checkbox_result:
-                    logger.info("✅ Mietprofil checkbox verified and checked")
-                else:
-                    logger.warning("⚠️ Mietprofil checkbox verification failed - continuing with submission anyway")
-                    logger.warning("The message will still be sent, but may not include tenant profile")
 
-            elif form_type == "messaging":
-                # Messaging forms: Verify message field
+            # Check Mietprofil on ALL forms (will gracefully skip if not present)
+            logger.info("Verifying Mietprofil checkbox before submission...")
+            checkbox_result = self._ensure_mietprofil_checked()
+            if checkbox_result:
+                logger.info("✅ Mietprofil checkbox verified and checked")
+            else:
+                logger.debug("Mietprofil checkbox not found or verification failed (may not exist on this form type)")
+
+            # Handle form-specific fields
+            if form_type == "messaging":
+                # Messaging forms: Also verify message field
                 logger.info("Verifying message field before submission...")
                 message_result = self._ensure_message_filled()
                 if message_result:
