@@ -558,14 +558,25 @@ class WillhabenContactBot:
                 logger.warning(f"⚠️  Message textarea not found: {e}")
                 return False
 
-            # Step 2: Verify if pre-filled (with React stability check)
-            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=3)
+            # Check if config enforces template usage over pre-fill
+            try:
+                config_path = os.path.join(os.path.dirname(__file__), 'config', 'message_templates.json')
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                enforce_template = config.get('use_template_over_prefill', False)
+            except:
+                enforce_template = False
 
-            if has_prefill:
-                logger.info("✅ Using pre-filled message template")
-                return True
+            # Step 2: Verify if pre-filled (unless config enforces template)
+            if enforce_template:
+                logger.info("Config enforces template usage - skipping pre-fill check")
+            else:
+                has_prefill = self._verify_message_prefill(message_textarea, max_attempts=3)
+                if has_prefill:
+                    logger.info("✅ Using pre-filled message template")
+                    return True
 
-            # Step 3: No pre-fill - fill with default text
+            # Step 3: No pre-fill - fill with template text
             logger.info("Filling message field with default text...")
             try:
                 message_text = self._load_message_template()
@@ -852,17 +863,16 @@ class WillhabenContactBot:
                 # If form found, process it
                 if form_found and form_type == "email":
                     # Email form: Check boxes
-                    # Viewing checkbox (optional)
+                    # Viewing checkbox (optional) - JS click + verify
                     try:
                         viewing_checkbox = self.driver.find_element(By.ID, "contactSuggestions-6")
-                        if viewing_checkbox and not viewing_checkbox.is_selected():
-                            self._try_click_element(viewing_checkbox, "viewing checkbox")
-                            logger.info("✓ Checked viewing option")
-                            self._random_delay(0.1, 0.2)
-                        else:
-                            logger.debug("Viewing checkbox already selected")
+                        self.driver.execute_script("arguments[0].click();", viewing_checkbox)
+                        time.sleep(0.1)
+                        is_checked = self.driver.execute_script("return arguments[0].checked;", viewing_checkbox)
+                        if is_checked:
+                            logger.debug("✓ Viewing checkbox verified checked")
                     except Exception as e:
-                        logger.debug(f"Viewing checkbox not found or not available: {e}")
+                        logger.debug(f"Viewing checkbox not available: {e}")
 
                     # Find submit button
                     try:
