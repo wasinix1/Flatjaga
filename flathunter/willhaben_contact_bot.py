@@ -572,11 +572,13 @@ class WillhabenContactBot:
                     return True
 
             # Step 3: No pre-fill - fill with template text
-            logger.info("Filling message field with default text...")
+            logger.info("Filling message field with template text...")
             try:
+                # Clear field first to avoid collision with any existing text
+                message_textarea.clear()
                 message_text = self._load_message_template()
                 message_textarea.send_keys(message_text)
-                logger.info("✅ Message field filled with default text")
+                logger.info("✅ Message field filled with template text")
                 return True
             except Exception as e:
                 logger.error(f"❌ Failed to fill message field: {e}")
@@ -865,7 +867,7 @@ class WillhabenContactBot:
                         time.sleep(0.1)
                         is_checked = self.driver.execute_script("return arguments[0].checked;", viewing_checkbox)
                         if is_checked:
-                            logger.debug("✓ Viewing checkbox verified checked")
+                            logger.info("✓ Viewing checkbox verified checked")
                     except Exception as e:
                         logger.debug(f"Viewing checkbox not available: {e}")
 
