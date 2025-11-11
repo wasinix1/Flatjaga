@@ -438,7 +438,41 @@ class WillhabenContactBot:
             logger.error(f"Critical error in Mietprofil verification: {e}", exc_info=True)
             return False
 
-    def _verify_message_prefill(self, message_textarea, max_attempts=10):
+    def _load_message_template(self):
+        """
+        Load active message template from JSON config file.
+
+        Returns:
+            str: Message text from active template, or hardcoded fallback on error
+        """
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), 'config', 'message_templates.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            active_id = config.get('active_template_id', 1)
+            templates = config.get('templates', [])
+
+            # Find active template by ID
+            for template in templates:
+                if template.get('id') == active_id:
+                    text = template.get('text', '')
+                    if text:
+                        logger.debug(f"Loaded template ID {active_id} from config")
+                        return text
+
+            # Fallback to first template if active_id not found
+            if templates and templates[0].get('text'):
+                logger.warning(f"Template ID {active_id} not found, using first available template")
+                return templates[0].get('text', '')
+
+            raise ValueError("No valid templates found in config")
+
+        except Exception as e:
+            logger.warning(f"Could not load template from JSON ({e}), using hardcoded fallback")
+            return "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+
+    def _verify_message_prefill(self, message_textarea, max_attempts=3):
         """
         Verify if message textarea has pre-filled content with 100% certainty.
         Waits for React stability and checks multiple times to ensure accuracy.
@@ -520,7 +554,7 @@ class WillhabenContactBot:
                 return False
 
             # Step 2: Verify if pre-filled (with React stability check)
-            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=10)
+            has_prefill = self._verify_message_prefill(message_textarea, max_attempts=3)
 
             if has_prefill:
                 logger.info("✅ Using pre-filled message template")
@@ -529,7 +563,7 @@ class WillhabenContactBot:
             # Step 3: No pre-fill - fill with default text
             logger.info("Filling message field with default text...")
             try:
-                message_text = "Guten Tag,\n\nich interessiere mich für diese Wohnung und würde gerne einen Besichtigungstermin vereinbaren.\n\nMit freundlichen Grüßen"
+                message_text = self._load_message_template()
                 message_textarea.send_keys(message_text)
                 logger.info("✅ Message field filled with default text")
                 return True
@@ -863,16 +897,14 @@ class WillhabenContactBot:
             else:
                 logger.debug("Mietprofil checkbox not found or verification failed (may not exist on this form type)")
 
-            # Handle form-specific fields
-            if form_type == "messaging":
-                # Messaging forms: Also verify message field
-                logger.info("Verifying message field before submission...")
-                message_result = self._ensure_message_filled()
-                if message_result:
-                    logger.info("✅ Message field verified and ready")
-                else:
-                    logger.warning("⚠️ Message field verification failed - continuing with submission anyway")
-                    logger.warning("The message may be empty or invalid")
+            # Verify message field for ALL form types (both email and messaging)
+            logger.info(f"Verifying message field for {form_type} form...")
+            message_result = self._ensure_message_filled()
+            if message_result:
+                logger.info("✅ Message field verified and ready")
+            else:
+                logger.warning("⚠️ Message field verification failed - continuing with submission anyway")
+                logger.warning("The message may be empty or invalid")
 
             # Submit the form with multiple click strategies
             logger.info(f"Submitting form (type: {form_type})")
