@@ -38,6 +38,11 @@ class SessionExpiredException(Exception):
     pass
 
 
+class AlreadyContactedException(Exception):
+    """Raised when a listing has already been contacted"""
+    pass
+
+
 class WillhabenContactBot:
     def __init__(self, headless=False, delay_min=0.5, delay_max=2.0, use_stealth=False):
         """
@@ -752,7 +757,7 @@ class WillhabenContactBot:
         # Check if already contacted
         if self.is_already_contacted(listing_url):
             logger.info(f"Already contacted: {listing_url}")
-            return False
+            raise AlreadyContactedException(f"Already contacted: {listing_url}")
 
         listing_id = listing_url.rstrip('/').split('/')[-1]
 
