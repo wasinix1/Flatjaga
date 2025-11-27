@@ -674,18 +674,24 @@ class WgGesuchtContactBot:
                     except:
                         security_done = True
 
-                # Template button
+                # Template button (new flow: dropdown -> link)
                 if security_done and not template_opened:
                     try:
-                        template_span = self.driver.find_element(By.CSS_SELECTOR,
-                            "span[data-text_insert_template='Vorlage einfügen']")
-                        parent_btn = template_span.find_element(By.XPATH, "./..")
-                        if parent_btn.is_displayed():
-                            self._click_element(parent_btn, "template button")
-                            logger.info("  ✓ Opened template modal")
-                            template_opened = True
-                            self._random_delay(action_type="thinking")
-                            break
+                        # Step 1: Click dropdown button to reveal menu
+                        dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
+                        if dropdown_btn.is_displayed():
+                            self._click_element(dropdown_btn, "conversation controls dropdown")
+                            logger.info("  ✓ Opened dropdown menu")
+                            self._random_delay(action_type="micro")
+
+                            # Step 2: Click template link in dropdown
+                            template_link = self.driver.find_element(By.CSS_SELECTOR, "a.message_template_btn")
+                            if template_link.is_displayed():
+                                self._click_element(template_link, "template button")
+                                logger.info("  ✓ Opened template modal")
+                                template_opened = True
+                                self._random_delay(action_type="thinking")
+                                break
                     except Exception as e:
                         logger.debug(f"  → Attempt {attempt+1}: Template button not found yet: {e}")
 
@@ -710,23 +716,22 @@ class WgGesuchtContactBot:
             # Select template
             logger.info(f"  → Selecting template {self.template_index}...")
             try:
-                template_spans = None
+                labels = None
                 for check_attempt in range(5):
-                    # New selector: span.message_template_span.checkbox_box
-                    template_spans = self.driver.find_elements(By.CSS_SELECTOR, "span.message_template_span.checkbox_box")
-                    if template_spans and len(template_spans) > self.template_index:
-                        logger.info(f"  ✓ Template spans loaded (check #{check_attempt+1})")
+                    labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
+                    if labels and len(labels) > self.template_index:
+                        logger.info(f"  ✓ Template labels loaded (check #{check_attempt+1})")
                         break
                     if check_attempt < 4:
-                        logger.debug(f"  → Retry {check_attempt+1}: Waiting for template spans...")
+                        logger.debug(f"  → Retry {check_attempt+1}: Waiting for template labels...")
                         time.sleep(0.3)
 
-                if not template_spans or len(template_spans) <= self.template_index:
-                    logger.error(f"  ✗ Template {self.template_index} not found (only {len(template_spans) if template_spans else 0} available)")
+                if not labels or len(labels) <= self.template_index:
+                    logger.error(f"  ✗ Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
                     return False
 
-                template_span = template_spans[self.template_index]
-                if not self._click_element(template_span, f"template {self.template_index}"):
+                label = labels[self.template_index]
+                if not self._click_element(label, f"template {self.template_index}"):
                     logger.error("  ✗ Could not select template")
                     return False
 
