@@ -674,24 +674,18 @@ class WgGesuchtContactBot:
                     except:
                         security_done = True
 
-                # Template button (new flow: dropdown -> link)
+                # Template button
                 if security_done and not template_opened:
                     try:
-                        # Step 1: Click dropdown button to reveal menu
-                        dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
-                        if dropdown_btn.is_displayed():
-                            self._click_element(dropdown_btn, "conversation controls dropdown")
-                            logger.info("  ✓ Opened dropdown menu")
-                            self._random_delay(action_type="micro")
-
-                            # Step 2: Click template link in dropdown
-                            template_link = self.driver.find_element(By.CSS_SELECTOR, "a.message_template_btn")
-                            if template_link.is_displayed():
-                                self._click_element(template_link, "template button")
-                                logger.info("  ✓ Opened template modal")
-                                template_opened = True
-                                self._random_delay(action_type="thinking")
-                                break
+                        template_span = self.driver.find_element(By.CSS_SELECTOR,
+                            "span[data-text_insert_template='Vorlage einfügen']")
+                        parent_btn = template_span.find_element(By.XPATH, "./..")
+                        if parent_btn.is_displayed():
+                            self._click_element(parent_btn, "template button")
+                            logger.info("  ✓ Opened template modal")
+                            template_opened = True
+                            self._random_delay(action_type="thinking")
+                            break
                     except Exception as e:
                         logger.debug(f"  → Attempt {attempt+1}: Template button not found yet: {e}")
 
