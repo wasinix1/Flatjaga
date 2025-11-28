@@ -674,32 +674,51 @@ class WgGesuchtContactBot:
                     except:
                         security_done = True
 
-                # Template button (new flow: dropdown -> link)
+                # Template button (try both old and new flows for compatibility)
                 if security_done and not template_opened:
-                    try:
-                        # Step 1: Click dropdown button to reveal menu
-                        logger.info(f"  → Looking for dropdown button (attempt {attempt+1}/10)...")
-                        dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
-                        if dropdown_btn.is_displayed():
-                            logger.info("  → Found dropdown button, clicking...")
-                            self._click_element(dropdown_btn, "conversation controls dropdown")
-                            logger.info("  ✓ Opened dropdown menu")
-                            self._random_delay(action_type="micro")
+                    logger.info(f"  → Looking for template button (attempt {attempt+1}/10)...")
 
-                            # Step 2: Wait for and click template link in dropdown
-                            logger.info("  → Waiting for template link to appear in dropdown...")
-                            template_link = WebDriverWait(self.driver, 3).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
-                            )
-                            logger.info("  → Template link ready, clicking...")
-                            self._click_element(template_link, "template button")
-                            logger.info("  ✓ Opened template modal")
-                            template_opened = True
-                            self._random_delay(action_type="thinking")
-                            break
+                    # Method 1: Try direct button (current/common version)
+                    try:
+                        template_btn = self.driver.find_element(By.CSS_SELECTOR,
+                            "span.new_conversation_message_template_btn")
+                        if template_btn.is_displayed():
+                            logger.info("  → Found direct template button, clicking...")
+                            if self._click_element(template_btn, "template button"):
+                                logger.info("  ✓ Opened template modal (direct button)")
+                                template_opened = True
+                                self._random_delay(action_type="thinking")
+                                break
                     except Exception as e:
-                        logger.info(f"  → Attempt {attempt+1}/10 failed: {type(e).__name__}")
-                        logger.debug(f"  → Details: {e}")
+                        logger.debug(f"  → Direct button not found: {type(e).__name__}")
+
+                    # Method 2: Try dropdown flow (alternate version)
+                    if not template_opened:
+                        try:
+                            dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
+                            if dropdown_btn.is_displayed():
+                                logger.info("  → Found dropdown button, clicking...")
+                                self._click_element(dropdown_btn, "conversation controls dropdown")
+                                logger.info("  ✓ Opened dropdown menu")
+                                self._random_delay(action_type="micro")
+
+                                # Wait for and click template link in dropdown
+                                logger.info("  → Waiting for template link in dropdown...")
+                                template_link = WebDriverWait(self.driver, 3).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
+                                )
+                                logger.info("  → Template link ready, clicking...")
+                                self._click_element(template_link, "template button")
+                                logger.info("  ✓ Opened template modal (dropdown flow)")
+                                template_opened = True
+                                self._random_delay(action_type="thinking")
+                                break
+                        except Exception as e:
+                            logger.debug(f"  → Dropdown flow not found: {type(e).__name__}")
+
+                    if not template_opened:
+                        logger.info(f"  → Attempt {attempt+1}/10: Neither button type found")
+                        logger.debug(f"  → Will retry...")
 
             if not template_opened:
                 logger.error("  ✗ Could not open template modal after 10 attempts")
