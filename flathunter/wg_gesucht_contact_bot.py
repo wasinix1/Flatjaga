@@ -678,22 +678,28 @@ class WgGesuchtContactBot:
                 if security_done and not template_opened:
                     try:
                         # Step 1: Click dropdown button to reveal menu
+                        logger.info(f"  → Looking for dropdown button (attempt {attempt+1}/10)...")
                         dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
                         if dropdown_btn.is_displayed():
+                            logger.info("  → Found dropdown button, clicking...")
                             self._click_element(dropdown_btn, "conversation controls dropdown")
                             logger.info("  ✓ Opened dropdown menu")
                             self._random_delay(action_type="micro")
 
-                            # Step 2: Click template link in dropdown
-                            template_link = self.driver.find_element(By.CSS_SELECTOR, "a.message_template_btn")
-                            if template_link.is_displayed():
-                                self._click_element(template_link, "template button")
-                                logger.info("  ✓ Opened template modal")
-                                template_opened = True
-                                self._random_delay(action_type="thinking")
-                                break
+                            # Step 2: Wait for and click template link in dropdown
+                            logger.info("  → Waiting for template link to appear in dropdown...")
+                            template_link = WebDriverWait(self.driver, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
+                            )
+                            logger.info("  → Template link ready, clicking...")
+                            self._click_element(template_link, "template button")
+                            logger.info("  ✓ Opened template modal")
+                            template_opened = True
+                            self._random_delay(action_type="thinking")
+                            break
                     except Exception as e:
-                        logger.debug(f"  → Attempt {attempt+1}: Template button not found yet: {e}")
+                        logger.info(f"  → Attempt {attempt+1}/10 failed: {type(e).__name__}")
+                        logger.debug(f"  → Details: {e}")
 
             if not template_opened:
                 logger.error("  ✗ Could not open template modal after 10 attempts")
@@ -720,16 +726,17 @@ class WgGesuchtContactBot:
                 for check_attempt in range(5):
                     labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
                     if labels and len(labels) > self.template_index:
-                        logger.info(f"  ✓ Template labels loaded (check #{check_attempt+1})")
+                        logger.info(f"  ✓ Found {len(labels)} templates (check #{check_attempt+1})")
                         break
                     if check_attempt < 4:
-                        logger.debug(f"  → Retry {check_attempt+1}: Waiting for template labels...")
+                        logger.info(f"  → Templates not ready yet (found {len(labels) if labels else 0}), retrying...")
                         time.sleep(0.3)
 
                 if not labels or len(labels) <= self.template_index:
                     logger.error(f"  ✗ Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
                     return False
 
+                logger.info(f"  → Clicking template {self.template_index}...")
                 label = labels[self.template_index]
                 if not self._click_element(label, f"template {self.template_index}"):
                     logger.error("  ✗ Could not select template")
@@ -744,17 +751,18 @@ class WgGesuchtContactBot:
             self._random_delay(action_type="thinking")
 
             # Insert template
-            logger.info("  → Inserting template...")
+            logger.info("  → Looking for insert button...")
             try:
                 insert_btn = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
                 )
+                logger.info("  → Found insert button, clicking...")
                 if not self._click_element(insert_btn, "insert button"):
                     logger.error("  ✗ Could not click insert button")
                     return False
-                logger.info("  ✓ Inserted template")
+                logger.info("  ✓ Template inserted into message field")
             except TimeoutException:
-                logger.error("  ✗ Insert button not found")
+                logger.error("  ✗ Insert button not found within timeout")
                 return False
 
             self._random_delay(action_type="thinking")
