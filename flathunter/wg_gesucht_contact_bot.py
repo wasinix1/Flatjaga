@@ -684,14 +684,15 @@ class WgGesuchtContactBot:
                             logger.info("  ✓ Opened dropdown menu")
                             self._random_delay(action_type="micro")
 
-                            # Step 2: Click template link in dropdown
-                            template_link = self.driver.find_element(By.CSS_SELECTOR, "a.message_template_btn")
-                            if template_link.is_displayed():
-                                self._click_element(template_link, "template button")
-                                logger.info("  ✓ Opened template modal")
-                                template_opened = True
-                                self._random_delay(action_type="thinking")
-                                break
+                            # Step 2: Wait for and click template link in dropdown
+                            template_link = WebDriverWait(self.driver, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
+                            )
+                            self._click_element(template_link, "template button")
+                            logger.info("  ✓ Opened template modal")
+                            template_opened = True
+                            self._random_delay(action_type="thinking")
+                            break
                     except Exception as e:
                         logger.debug(f"  → Attempt {attempt+1}: Template button not found yet: {e}")
 
