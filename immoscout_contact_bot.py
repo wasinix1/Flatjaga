@@ -317,6 +317,115 @@ class ImmoscoutContactBot:
 
         logger.debug(f"📜 Human scroll {direction} ({distance}px in {steps} steps)")
 
+    def _handle_cookie_popup(self):
+        """
+        Detect and dismiss cookie consent popups
+        CRITICAL for EU sites like ImmoScout24
+        """
+        logger.debug("🍪 Checking for cookie popup...")
+
+        # Common cookie popup button selectors (CSS)
+        css_selectors = [
+            # ImmoScout24 specific
+            'button[data-testid="uc-accept-all-button"]',
+            'button[id*="accept"]',
+            'button[class*="accept"]',
+
+            # By class/id patterns
+            '[class*="cookie"][class*="accept"]',
+            '[id*="cookie"][id*="accept"]',
+            '[class*="consent"][class*="accept"]',
+            '#onetrust-accept-btn-handler',
+            '.uc-button-accept',
+
+            # Last resort - any button in cookie/consent containers
+            '[class*="cookie"] button',
+            '[id*="cookie"] button',
+            '[class*="consent"] button',
+            '[id*="consent"] button'
+        ]
+
+        # XPath selectors for text matching
+        xpath_selectors = [
+            '//button[contains(text(), "Akzeptieren")]',
+            '//button[contains(text(), "Alle akzeptieren")]',
+            '//button[contains(text(), "Accept all")]',
+            '//button[contains(text(), "Accept")]',
+            '//button[contains(text(), "Zustimmen")]',
+            '//a[contains(text(), "Akzeptieren")]',
+            '//button[contains(@class, "accept")]',
+        ]
+
+        # Try CSS selectors first
+        for selector in css_selectors:
+            try:
+                # Look for button (short timeout)
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+
+                # Filter visible buttons only
+                visible_buttons = [b for b in buttons if b.is_displayed()]
+
+                if visible_buttons:
+                    button = visible_buttons[0]
+                    logger.info(f"✅ Found cookie popup button: {selector}")
+
+                    # Human-like interaction
+                    self._random_delay(0.3, 0.7, "noticed cookie popup")
+
+                    # Move mouse to button
+                    try:
+                        self._human_mouse_move(button)
+                    except:
+                        pass  # If mouse move fails, still try to click
+
+                    self._random_delay(0.2, 0.5, "before clicking accept")
+
+                    # Click
+                    button.click()
+                    logger.info("🍪 Clicked cookie accept button")
+
+                    # Wait for popup to disappear
+                    self._random_delay(0.5, 1.0, "popup closing")
+
+                    return True
+
+            except Exception as e:
+                logger.debug(f"  CSS selector '{selector}' failed: {e}")
+                continue
+
+        # Try XPath selectors (for text matching)
+        for xpath in xpath_selectors:
+            try:
+                buttons = self.driver.find_elements(By.XPATH, xpath)
+                visible_buttons = [b for b in buttons if b.is_displayed()]
+
+                if visible_buttons:
+                    button = visible_buttons[0]
+                    logger.info(f"✅ Found cookie popup button via XPath: {xpath}")
+
+                    # Human-like interaction
+                    self._random_delay(0.3, 0.7, "noticed cookie popup")
+
+                    try:
+                        self._human_mouse_move(button)
+                    except:
+                        pass
+
+                    self._random_delay(0.2, 0.5, "before clicking accept")
+
+                    button.click()
+                    logger.info("🍪 Clicked cookie accept button")
+
+                    self._random_delay(0.5, 1.0, "popup closing")
+                    return True
+
+            except Exception as e:
+                logger.debug(f"  XPath '{xpath}' failed: {e}")
+                continue
+
+        logger.debug("🍪 No cookie popup found (or already accepted)")
+        return False
+
     def _reading_behavior(self):
         """
         Simulate human reading behavior
@@ -597,6 +706,9 @@ class ImmoscoutContactBot:
             self.driver.refresh()
             self._random_delay(1, 2, "page refresh")
 
+            # Handle cookie popup after login
+            self._handle_cookie_popup()
+
             return True
 
         except Exception as e:
@@ -623,6 +735,10 @@ class ImmoscoutContactBot:
                 if user_elements:
                     logger.info("✅ LOGIN DETECTED!")
                     self._random_delay(1, 2, "after login")
+
+                    # Handle cookie popup after login
+                    self._handle_cookie_popup()
+
                     return True
 
                 elapsed = int(time.time() - start_time)
@@ -702,6 +818,9 @@ class ImmoscoutContactBot:
             logger.info("🌐 Navigating to listing...")
             self.driver.get(listing_url)
             self._random_delay(2, 4, "page load")
+
+            # Handle cookie popup FIRST (critical for EU sites)
+            self._handle_cookie_popup()
 
             # Human reading behavior
             self._reading_behavior()
