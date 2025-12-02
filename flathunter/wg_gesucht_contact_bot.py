@@ -371,20 +371,20 @@ class WgGesuchtContactBot:
                 logger.info(f"          ✗ Fallback check failed: {type(e).__name__}")
                 return False
 
-    def _find_and_click_template_button(self, max_attempts=10):
+    def _find_and_click_template_button(self, max_attempts=3):
         """
-        Find and click template button with comprehensive logging and multiple fallback strategies.
+        Find and click template button with comprehensive logging and fallback strategies.
 
-        Tries multiple selector strategies and click methods to handle different site versions
-        and DOM states. Provides detailed INFO-level logging for every attempt.
+        Uses primary CSS selector with text-based fallback, plus dropdown flow for alternate UI.
+        Tries 3 click methods per element to handle overlays/interceptions.
 
         Args:
-            max_attempts: Maximum number of retry attempts (default 10)
+            max_attempts: Maximum retry attempts (default 3)
 
         Returns:
             True if template modal opened successfully, False otherwise
         """
-        # Strategy 1: Direct button (most common current version)
+        # Direct button selectors (prioritized by reliability)
         direct_button_strategies = [
             {
                 "name": "CSS: span.new_conversation_message_template_btn",
@@ -392,30 +392,17 @@ class WgGesuchtContactBot:
                 "value": "span.new_conversation_message_template_btn",
             },
             {
-                "name": "XPath: by class contains",
-                "method": By.XPATH,
-                "value": "//span[contains(@class, 'new_conversation_message_template_btn')]",
-            },
-            {
                 "name": "XPath: by text 'Vorlage einfügen'",
                 "method": By.XPATH,
                 "value": "//span[contains(., 'Vorlage einfügen') and contains(@class, 'conversation_action_button')]",
             },
-            {
-                "name": "XPath: by nested text span",
-                "method": By.XPATH,
-                "value": "//span[.//span[contains(text(), 'Vorlage einfügen')]]",
-            },
         ]
-
-        # Strategy 2: Dropdown flow (alternate version)
-        dropdown_available = False
 
         for attempt in range(max_attempts):
             logger.info(f"  → Template Button Discovery (Attempt {attempt+1}/{max_attempts})")
             self._random_delay(action_type="micro")
 
-            # Try direct button strategies first
+            # Try direct button strategies
             logger.info(f"    → Trying direct button strategies...")
             for strategy in direct_button_strategies:
                 logger.info(f"      → Strategy: {strategy['name']}")
@@ -888,7 +875,7 @@ class WgGesuchtContactBot:
 
             # STEP 5: Find and click template button (with comprehensive logging)
             logger.info("  → Opening template modal...")
-            if not self._find_and_click_template_button(max_attempts=10):
+            if not self._find_and_click_template_button():
                 return False
 
             # Modal is now open and verified by _find_and_click_template_button
@@ -1051,199 +1038,3 @@ class WgGesuchtContactBot:
             signal.alarm(0)  # Ensure alarm is always cancelled
 
 
-def contact_listing(driver, listing_url, template_index=0, timeout=10):
-    """
-    Contact a WG-Gesucht listing using saved session.
-    
-    Flow:
-    1. Navigate to listing
-    2. Click "Nachricht senden" button
-    3. Handle security tips popup (auto-appears)
-    4. Click "Vorlage einfügen" button on message page
-    5. Select template in modal
-    6. Click insert template
-    7. Click send
-    8. Verify success
-    
-    Args:
-        driver: Selenium WebDriver with valid session
-        listing_url: Full URL to WG-Gesucht listing
-        template_index: Which template checkbox to click (default 0 = first)
-        timeout: Max seconds to wait for elements (default 10)
-    
-    Returns:
-        True if successful
-        
-    Raises:
-        SessionExpiredException: If session expired
-        ContactFailedException: If contact flow fails
-    """
-    
-    try:
-        print(f"📧 Contacting listing: {listing_url}")
-        
-        # Step 1: Navigate to listing
-        driver.get(listing_url)
-        
-        # Check if we got redirected to login (session expired)
-        if 'login' in driver.current_url.lower():
-            mark_session_invalid()
-            raise SessionExpiredException("Session expired - redirected to login")
-        
-        # Step 2: Click "Nachricht senden" button
-        # Looking for orange button with text "Nachricht senden"
-        try:
-            send_button = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'btn') and contains(text(), 'Nachricht senden')]"))
-            )
-            send_button.click()
-            print("  ✓ Clicked 'Nachricht senden' button")
-        except TimeoutException:
-            raise ContactFailedException("Could not find 'Nachricht senden' button")
-        
-        # Step 3: Handle security tips popup (auto-appears)
-        # Wait for modal with "Wichtige Sicherheitstipps"
-        try:
-            # Wait for the security modal to appear
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Wichtige Sicherheitstipps')]"))
-            )
-            
-            # Click the yellow button "Ich habe die Sicherheitstipps gelesen"
-            confirm_button = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Ich habe die Sicherheitstipps gelesen')]"))
-            )
-            confirm_button.click()
-            print("  ✓ Dismissed security tips popup")
-        except TimeoutException:
-            # Security popup might not appear every time, continue
-            print("  ⚠️  Security tips popup didn't appear (may have been dismissed before)")
-        
-        # Small wait for page to settle after popup
-        time.sleep(0.3)  # Reduced from 1s for performance
-        
-        # Step 4: Click "Vorlage einfügen" button to open template selector
-        try:
-            template_button = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Vorlage einfügen') or contains(., 'Vorlage einfügen')]"))
-            )
-            template_button.click()
-            print("  ✓ Clicked 'Vorlage einfügen' button")
-        except TimeoutException:
-            raise ContactFailedException("Could not find 'Vorlage einfügen' button")
-        
-        # Step 5: Handle template selection modal (now it appears)
-        # Wait for modal with "Wählen Sie eine Nachrichtenvorlage"
-        try:
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Wählen Sie eine Nachrichtenvorlage')]"))
-            )
-            print("  ✓ Template selector modal opened")
-        except TimeoutException:
-            raise ContactFailedException("Template selector modal didn't appear")
-        
-        # Click checkbox at template_index (default 0 = first checkbox) with smart wait
-        try:
-            # Smart wait: Check if checkboxes are loaded (max 5 attempts over ~1.5s)
-            checkboxes = None
-            for check_attempt in range(5):
-                checkboxes = driver.find_elements(By.XPATH, "//input[@type='checkbox']")
-                if checkboxes and len(checkboxes) > template_index:
-                    print(f"  ✓ Template checkboxes loaded (check #{check_attempt+1})")
-                    break
-                if check_attempt < 4:
-                    time.sleep(0.3)
-
-            if not checkboxes or len(checkboxes) <= template_index:
-                raise ContactFailedException(f"Template index {template_index} not found (only {len(checkboxes) if checkboxes else 0} templates available)")
-
-            # Click the checkbox at the specified index
-            checkbox = checkboxes[template_index]
-
-            # Try multiple strategies to ensure selection
-            clicked = False
-            strategies = [
-                ("JavaScript click", lambda: driver.execute_script("arguments[0].click();", checkbox)),
-                ("set checked + events", lambda: driver.execute_script("""
-                    arguments[0].checked = true;
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                    arguments[0].dispatchEvent(new Event('click', { bubbles: true }));
-                """, checkbox)),
-            ]
-
-            for strategy_name, strategy_func in strategies:
-                try:
-                    strategy_func()
-                    print(f"  ✓ Selected template {template_index} using {strategy_name}")
-                    clicked = True
-                    break
-                except Exception as e:
-                    print(f"  {strategy_name} failed: {e}")
-
-            if not clicked:
-                raise ContactFailedException("All template selection strategies failed")
-
-        except Exception as e:
-            raise ContactFailedException(f"Could not select template: {e}")
-        
-        # Step 6: Click "VORLAGE EINFÜGEN" button in modal
-        try:
-            insert_button = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'VORLAGE EINFÜGEN')]"))
-            )
-            insert_button.click()
-            print("  ✓ Clicked 'VORLAGE EINFÜGEN' button")
-        except TimeoutException:
-            raise ContactFailedException("Could not find 'VORLAGE EINFÜGEN' button")
-        
-        # Small wait for template to be inserted
-        time.sleep(0.3)  # Reduced from 1s for performance
-        
-        # Step 7: Click "Senden" button (final send)
-        try:
-            send_final = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn') and contains(text(), 'Senden')]"))
-            )
-            send_final.click()
-            print("  ✓ Clicked final 'Senden' button")
-        except TimeoutException:
-            raise ContactFailedException("Could not find final 'Senden' button")
-        
-        # Step 8: Wait for success banner containing "erfolgreich"
-        try:
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'erfolgreich')]"))
-            )
-            print("  ✅ Message sent successfully!")
-            return True
-        except TimeoutException:
-            raise ContactFailedException("Success confirmation not found")
-    
-    except SessionExpiredException:
-        # Re-raise session exceptions
-        raise
-    
-    except Exception as e:
-        # Log other failures
-        print(f"  ❌ Failed to contact listing: {e}")
-        raise ContactFailedException(str(e))
-
-
-def contact_listing_safe(driver, listing_url, template_index=0):
-    """
-    Safe wrapper around contact_listing that catches exceptions.
-    Returns True/False instead of raising exceptions.
-    Marks session as invalid if session expired.
-    """
-    try:
-        return contact_listing(driver, listing_url, template_index)
-    except SessionExpiredException as e:
-        print(f"⚠️  Session expired: {e}")
-        mark_session_invalid()
-        return False
-    except ContactFailedException as e:
-        print(f"⚠️  Contact failed: {e}")
-        return False
-    except Exception as e:
-        print(f"⚠️  Unexpected error: {e}")
-        return False
