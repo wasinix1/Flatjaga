@@ -391,14 +391,13 @@ class ImmoscoutContactBot:
 
         try:
             if HAS_UC:
-                # Use undetected-chromedriver
+                # Use undetected-chromedriver (handles most stealth automatically)
                 options = uc.ChromeOptions()
 
                 if self.headless:
                     options.add_argument('--headless=new')
 
-                # Anti-detection
-                options.add_argument('--disable-blink-features=AutomationControlled')
+                # Basic options (uc.Chrome handles the stealth stuff)
                 options.add_argument('--disable-dev-shm-usage')
                 options.add_argument('--no-sandbox')
                 options.add_argument(f'--user-agent={self.user_agent}')
@@ -409,11 +408,8 @@ class ImmoscoutContactBot:
                 height = random.randint(900, 1080)
                 options.add_argument(f'--window-size={width},{height}')
 
-                # Disable automation flags
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option('useAutomationExtension', False)
-
-                self.driver = uc.Chrome(options=options, version_main=None)
+                # Let undetected-chromedriver handle the stealth (don't override)
+                self.driver = uc.Chrome(options=options, version_main=None, use_subprocess=True)
 
                 logger.info("✅ undetected-chromedriver started")
 
@@ -436,8 +432,12 @@ class ImmoscoutContactBot:
                 height = random.randint(900, 1080)
                 options.add_argument(f'--window-size={width},{height}')
 
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option('useAutomationExtension', False)
+                # Try to add experimental options (may not work on all Selenium versions)
+                try:
+                    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                    options.add_experimental_option('useAutomationExtension', False)
+                except:
+                    logger.debug("Could not set experimental options (old Selenium version?)")
 
                 self.driver = webdriver.Chrome(options=options)
 
