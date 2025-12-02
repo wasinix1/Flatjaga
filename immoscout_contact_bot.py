@@ -461,14 +461,10 @@ class ImmoscoutContactBot:
         - Natural rhythm
 
         Args:
-            element: Selenium element to type into
+            element: Selenium element to type into (should already be focused)
             text: Text to type
         """
         logger.debug(f"⌨️  Typing {len(text)} characters...")
-
-        # Click element first
-        element.click()
-        self._random_delay(0.2, 0.5, "after click, before typing")
 
         words = text.split()
 
@@ -899,9 +895,27 @@ class ImmoscoutContactBot:
 
                 # Move mouse to textarea
                 self._human_mouse_move(message_textarea)
-                self._random_delay(0.3, 0.7, "before typing")
+                self._random_delay(0.3, 0.7, "before clicking textarea")
+
+                # Click to focus
+                message_textarea.click()
+                self._random_delay(0.2, 0.4, "after clicking textarea")
+
+                # Clear any existing text (placeholder or previous content)
+                logger.debug("🧹 Clearing textarea...")
+                message_textarea.clear()
+
+                # Also clear with Ctrl+A + Delete (some textareas don't clear properly)
+                try:
+                    message_textarea.send_keys(Keys.CONTROL + "a")
+                    message_textarea.send_keys(Keys.DELETE)
+                except:
+                    pass
+
+                self._random_delay(0.2, 0.4, "after clearing")
 
                 # Type message with human timing
+                logger.info("⌨️  Typing message...")
                 self._human_type(message_textarea, message_text)
 
                 logger.info("✅ Message filled!")
