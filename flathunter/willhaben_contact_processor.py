@@ -9,12 +9,38 @@ from flathunter.session_manager import SessionManager
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 import time
 import json
+import random
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 
 class WillhabenContactProcessor:
     """Processor that auto-contacts willhaben listings - with crash recovery and headless fallback"""
+
+    @staticmethod
+    def _calculate_business_hours_delay():
+        """Calculate delay if current time is outside business hours (00:00-06:00 CET).
+        Returns delay in seconds to wait until 06:01-06:20 AM CET, or 0 if already in business hours."""
+        cet = ZoneInfo("Europe/Berlin")  # CET/CEST timezone
+        now = datetime.now(cet)
+        current_hour = now.hour
+
+        # Check if we're in the night period (midnight to 6 AM CET)
+        if 0 <= current_hour < 6:
+            # Calculate time until 6 AM CET
+            target_time = now.replace(hour=6, minute=0, second=0, microsecond=0)
+            seconds_until_6am = (target_time - now).total_seconds()
+
+            # Add random 1-20 minutes (60-1200 seconds) after 6 AM
+            random_offset = random.randint(60, 1200)
+            total_delay = seconds_until_6am + random_offset
+
+            target_contact_time = now + timedelta(seconds=total_delay)
+            logger.info(f"⏰ Business hours delay: Listing picked up at {now.strftime('%H:%M:%S %Z')}, will contact at {target_contact_time.strftime('%H:%M:%S %Z')}")
+            return total_delay
+
+        return 0
 
     def __init__(self, config, telegram_notifier=None, id_watch=None, session_manager=None):
         self.config = config
@@ -388,6 +414,12 @@ class WillhabenContactProcessor:
                     retry_msg = f" (session {browser_session+1}, attempt {attempt+1})" if browser_session > 0 or attempt > 0 else ""
                     if retry_msg:
                         logger.info(f"  Retry: {retry_msg}")
+
+                    # Apply business hours delay before contacting (only on first attempt)
+                    if browser_session == 0 and attempt == 0:
+                        delay = self._calculate_business_hours_delay()
+                        if delay > 0:
+                            time.sleep(delay)
 
                     success = self.bot.send_contact_message(url)
 
