@@ -42,8 +42,8 @@ QUICK_QUESTIONS = {
 
 # Bot settings
 HEADLESS = False  # Set to True to run in background (no visible browser)
-DELAY_MIN = 1.5   # Minimum delay in seconds (SLOW)
-DELAY_MAX = 4.0   # Maximum delay in seconds (CAUTIOUS)
+DELAY_MIN = 0.8   # Minimum delay in seconds (FAST & CONFIDENT - like sneaker bots)
+DELAY_MAX = 2.5   # Maximum delay in seconds (STILL HUMAN-LIKE)
 
 # ============================================================================
 # MAIN TEST
