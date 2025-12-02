@@ -303,6 +303,224 @@ class WgGesuchtContactBot:
         logger.warning(f"✗ All click strategies failed for {description}")
         return False
 
+    def _click_element_verbose(self, element, description="element"):
+        """
+        Click element with detailed INFO-level logging for each strategy.
+        Used for critical operations where we need full visibility.
+
+        Args:
+            element: Selenium WebElement to click
+            description: Description for logging
+
+        Returns:
+            True if click succeeded, False otherwise
+        """
+        click_strategies = [
+            ("normal click", lambda e: e.click()),
+            ("JavaScript click", lambda e: self.driver.execute_script("arguments[0].click();", e)),
+            ("scroll into view and click", lambda e: (
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", e),
+                time.sleep(0.2),
+                e.click()
+            )),
+        ]
+
+        for i, (strategy_name, strategy_func) in enumerate(click_strategies, 1):
+            logger.info(f"        → Click attempt {i}/{len(click_strategies)}: {strategy_name}")
+            try:
+                strategy_func(element)
+                logger.info(f"          ✓ {strategy_name} succeeded")
+                return True
+            except Exception as e:
+                error_msg = str(e)[:100] if str(e) else type(e).__name__
+                logger.info(f"          ✗ {strategy_name} failed: {type(e).__name__}: {error_msg}")
+
+        logger.warning(f"        ✗ All {len(click_strategies)} click strategies failed for {description}")
+        return False
+
+    def _verify_modal_opened(self, timeout=3):
+        """
+        Verify template modal actually opened after clicking template button.
+
+        Args:
+            timeout: Seconds to wait for modal
+
+        Returns:
+            True if modal is present, False otherwise
+        """
+        try:
+            # Primary check: modal header text
+            WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH,
+                    "//p[contains(text(), 'Wählen Sie eine Nachrichtenvorlage')]"))
+            )
+            logger.info(f"          ✓ Modal header found")
+            return True
+        except TimeoutException:
+            logger.info(f"          → Modal header not found, trying fallback check...")
+            # Fallback: check for template labels (the actual template list)
+            try:
+                labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
+                if labels:
+                    logger.info(f"          ✓ Modal verified via template labels (found {len(labels)})")
+                    return True
+                else:
+                    logger.info(f"          ✗ No template labels found")
+                    return False
+            except Exception as e:
+                logger.info(f"          ✗ Fallback check failed: {type(e).__name__}")
+                return False
+
+    def _find_and_click_template_button(self, max_attempts=10):
+        """
+        Find and click template button with comprehensive logging and multiple fallback strategies.
+
+        Tries multiple selector strategies and click methods to handle different site versions
+        and DOM states. Provides detailed INFO-level logging for every attempt.
+
+        Args:
+            max_attempts: Maximum number of retry attempts (default 10)
+
+        Returns:
+            True if template modal opened successfully, False otherwise
+        """
+        # Strategy 1: Direct button (most common current version)
+        direct_button_strategies = [
+            {
+                "name": "CSS: span.new_conversation_message_template_btn",
+                "method": By.CSS_SELECTOR,
+                "value": "span.new_conversation_message_template_btn",
+            },
+            {
+                "name": "XPath: by class contains",
+                "method": By.XPATH,
+                "value": "//span[contains(@class, 'new_conversation_message_template_btn')]",
+            },
+            {
+                "name": "XPath: by text 'Vorlage einfügen'",
+                "method": By.XPATH,
+                "value": "//span[contains(., 'Vorlage einfügen') and contains(@class, 'conversation_action_button')]",
+            },
+            {
+                "name": "XPath: by nested text span",
+                "method": By.XPATH,
+                "value": "//span[.//span[contains(text(), 'Vorlage einfügen')]]",
+            },
+        ]
+
+        # Strategy 2: Dropdown flow (alternate version)
+        dropdown_available = False
+
+        for attempt in range(max_attempts):
+            logger.info(f"  → Template Button Discovery (Attempt {attempt+1}/{max_attempts})")
+            self._random_delay(action_type="micro")
+
+            # Try direct button strategies first
+            logger.info(f"    → Trying direct button strategies...")
+            for strategy in direct_button_strategies:
+                logger.info(f"      → Strategy: {strategy['name']}")
+
+                try:
+                    # Try to find element
+                    element = self.driver.find_element(strategy['method'], strategy['value'])
+
+                    # Log element details for diagnostics
+                    classes = element.get_attribute('class') or 'none'
+                    style = element.get_attribute('style') or 'none'
+                    text_content = element.text or ''
+                    tag_name = element.tag_name
+                    is_displayed = element.is_displayed()
+                    is_enabled = element.is_enabled()
+
+                    # Truncate long values for readability
+                    classes_short = classes[:80] + '...' if len(classes) > 80 else classes
+                    style_short = style[:80] + '...' if len(style) > 80 else style
+                    text_short = text_content[:40] + '...' if len(text_content) > 40 else text_content
+
+                    logger.info(f"        ✓ Found element: <{tag_name}>")
+                    logger.info(f"          Classes: {classes_short}")
+                    logger.info(f"          Text: '{text_short}'")
+                    logger.info(f"          Displayed: {is_displayed}, Enabled: {is_enabled}")
+                    logger.info(f"          Style: {style_short}")
+
+                    if not is_displayed:
+                        logger.info(f"        ✗ Element not displayed, trying next strategy")
+                        continue
+
+                    if not is_enabled:
+                        logger.info(f"        ⚠ Element not enabled, but will try to click anyway")
+
+                    # Try to click with verbose logging
+                    logger.info(f"        → Attempting to click element...")
+                    if self._click_element_verbose(element, "template button"):
+                        # Verify modal opened
+                        logger.info(f"        → Verifying modal opened...")
+                        if self._verify_modal_opened(timeout=3):
+                            logger.info(f"      ✓✓ SUCCESS: Template modal opened via {strategy['name']}")
+                            return True
+                        else:
+                            logger.warning(f"        ✗ Click succeeded but modal didn't open")
+                            logger.info(f"        → Continuing to next strategy...")
+                    else:
+                        logger.warning(f"        ✗ All click strategies failed for this element")
+                        logger.info(f"        → Continuing to next strategy...")
+
+                except NoSuchElementException:
+                    logger.info(f"        ✗ Element not found with this selector")
+                except Exception as e:
+                    error_msg = str(e)[:100] if str(e) else ''
+                    logger.info(f"        ✗ Exception: {type(e).__name__}: {error_msg}")
+
+            # Try dropdown flow (alternate site version)
+            logger.info(f"    → Trying dropdown flow (alternate version)...")
+            try:
+                dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
+
+                is_displayed = dropdown_btn.is_displayed()
+                logger.info(f"      ✓ Found dropdown button (displayed: {is_displayed})")
+
+                if is_displayed:
+                    logger.info(f"      → Clicking dropdown button...")
+                    if self._click_element_verbose(dropdown_btn, "conversation controls dropdown"):
+                        logger.info(f"      ✓ Dropdown menu opened")
+                        self._random_delay(action_type="micro")
+
+                        # Wait for and click template link in dropdown
+                        logger.info(f"      → Waiting for template link in dropdown...")
+                        try:
+                            template_link = WebDriverWait(self.driver, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
+                            )
+                            logger.info(f"      ✓ Template link found, clicking...")
+                            if self._click_element_verbose(template_link, "template link"):
+                                # Verify modal opened
+                                logger.info(f"      → Verifying modal opened...")
+                                if self._verify_modal_opened(timeout=3):
+                                    logger.info(f"    ✓✓ SUCCESS: Template modal opened via dropdown flow")
+                                    return True
+                                else:
+                                    logger.warning(f"      ✗ Click succeeded but modal didn't open")
+                            else:
+                                logger.warning(f"      ✗ Could not click template link")
+                        except TimeoutException:
+                            logger.info(f"      ✗ Template link not found in dropdown menu")
+                    else:
+                        logger.info(f"      ✗ Could not click dropdown button")
+                else:
+                    logger.info(f"      ✗ Dropdown button not displayed")
+
+            except NoSuchElementException:
+                logger.info(f"      ✗ Dropdown button not found (conversation_controls_dropdown)")
+            except Exception as e:
+                error_msg = str(e)[:100] if str(e) else ''
+                logger.info(f"      ✗ Dropdown flow exception: {type(e).__name__}: {error_msg}")
+
+            logger.info(f"    → All strategies failed for attempt {attempt+1}, will retry...")
+
+        logger.error(f"  ✗✗ FAILED: Could not open template modal after {max_attempts} attempts")
+        logger.error(f"     All selector and click strategies exhausted")
+        return False
+
     def _init_driver(self):
         """Create Selenium driver with optional stealth mode."""
         # If stealth mode is enabled, try to use undetected-chromedriver
@@ -652,90 +870,28 @@ class WgGesuchtContactBot:
 
             logger.info(f"  ✓ On contact page (via {discovery_method})")
 
-            # STEP 4: Handle popups and fill form
-            security_done = False
-            template_opened = False
-
-            logger.info("  → Handling popups and opening template modal...")
-            for attempt in range(10):
-                self._random_delay(action_type="micro")
-
-                # Security tips popup
-                if not security_done:
-                    try:
-                        confirm_btn = self.driver.find_element(By.XPATH,
-                            "//button[contains(text(), 'Ich habe die Sicherheitstipps gelesen')]")
-                        if confirm_btn.is_displayed():
-                            self._click_element(confirm_btn, "security tips")
-                            logger.info("  ✓ Dismissed security tips")
-                            security_done = True
-                            self._random_delay(action_type="thinking")
-                            continue
-                    except:
-                        security_done = True
-
-                # Template button (try both old and new flows for compatibility)
-                if security_done and not template_opened:
-                    logger.info(f"  → Looking for template button (attempt {attempt+1}/10)...")
-
-                    # Method 1: Try direct button (current/common version)
-                    try:
-                        template_btn = self.driver.find_element(By.CSS_SELECTOR,
-                            "span.new_conversation_message_template_btn")
-                        if template_btn.is_displayed():
-                            logger.info("  → Found direct template button, clicking...")
-                            if self._click_element(template_btn, "template button"):
-                                logger.info("  ✓ Opened template modal (direct button)")
-                                template_opened = True
-                                self._random_delay(action_type="thinking")
-                                break
-                    except Exception as e:
-                        logger.debug(f"  → Direct button not found: {type(e).__name__}")
-
-                    # Method 2: Try dropdown flow (alternate version)
-                    if not template_opened:
-                        try:
-                            dropdown_btn = self.driver.find_element(By.ID, "conversation_controls_dropdown")
-                            if dropdown_btn.is_displayed():
-                                logger.info("  → Found dropdown button, clicking...")
-                                self._click_element(dropdown_btn, "conversation controls dropdown")
-                                logger.info("  ✓ Opened dropdown menu")
-                                self._random_delay(action_type="micro")
-
-                                # Wait for and click template link in dropdown
-                                logger.info("  → Waiting for template link in dropdown...")
-                                template_link = WebDriverWait(self.driver, 3).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
-                                )
-                                logger.info("  → Template link ready, clicking...")
-                                self._click_element(template_link, "template button")
-                                logger.info("  ✓ Opened template modal (dropdown flow)")
-                                template_opened = True
-                                self._random_delay(action_type="thinking")
-                                break
-                        except Exception as e:
-                            logger.debug(f"  → Dropdown flow not found: {type(e).__name__}")
-
-                    if not template_opened:
-                        logger.info(f"  → Attempt {attempt+1}/10: Neither button type found")
-                        logger.debug(f"  → Will retry...")
-
-            if not template_opened:
-                logger.error("  ✗ Could not open template modal after 10 attempts")
-                return False
-
-            # Wait for modal
-            logger.info("  → Waiting for template modal to appear...")
+            # STEP 4: Handle security popup
+            logger.info("  → Checking for security tips popup...")
             try:
-                WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        "//p[contains(text(), 'Wählen Sie eine Nachrichtenvorlage')]"))
+                confirm_btn = WebDriverWait(self.driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH,
+                        "//button[contains(text(), 'Ich habe die Sicherheitstipps gelesen')]"))
                 )
-                logger.info("  ✓ Template modal visible")
+                logger.info("  → Security popup found, dismissing...")
+                self._click_element(confirm_btn, "security tips")
+                logger.info("  ✓ Dismissed security tips")
+                self._random_delay(action_type="thinking")
             except TimeoutException:
-                logger.error("  ✗ Modal didn't appear within timeout")
+                logger.info("  → No security popup (already dismissed or not shown)")
+            except Exception as e:
+                logger.warning(f"  → Security popup handling failed: {type(e).__name__}: {str(e)[:80]}")
+
+            # STEP 5: Find and click template button (with comprehensive logging)
+            logger.info("  → Opening template modal...")
+            if not self._find_and_click_template_button(max_attempts=10):
                 return False
 
+            # Modal is now open and verified by _find_and_click_template_button
             self._random_delay(action_type="thinking")
 
             # Select template
