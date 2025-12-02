@@ -915,20 +915,88 @@ class ImmoscoutContactBot:
             self._mouse_jitter()  # Move cursor around while reviewing
             self._random_delay(1.5, 3.0, "final review")
 
+            # Check for any overlays/modals that might block the submit button
+            logger.debug("🔍 Checking for blocking overlays...")
+            try:
+                # Common overlay/modal close buttons
+                overlay_selectors = [
+                    'button[aria-label*="close"]',
+                    'button[aria-label*="schließen"]',
+                    '.modal-close',
+                    '[class*="overlay"] button[class*="close"]',
+                    '[class*="modal"] button[class*="close"]'
+                ]
+
+                for selector in overlay_selectors:
+                    try:
+                        overlays = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for overlay in overlays:
+                            if overlay.is_displayed():
+                                logger.info(f"⚠️  Found blocking overlay, closing it...")
+                                overlay.click()
+                                self._random_delay(0.3, 0.6, "overlay closed")
+                                break
+                    except:
+                        pass
+            except Exception as e:
+                logger.debug(f"Overlay check failed: {e}")
+
             # Find and click submit
             logger.info("🔍 Looking for submit button...")
             try:
                 submit_button = self.driver.find_element(By.CSS_SELECTOR,
                     'button[type="submit"]')
 
+                # Scroll button into view (aggressive - ensure it's visible)
+                logger.debug("📜 Scrolling submit button into view...")
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                    submit_button
+                )
+                self._random_delay(0.5, 1.0, "after scroll to button")
+
                 # Move mouse to submit button
-                self._human_mouse_move(submit_button)
-                self._random_delay(0.5, 1.0, "hovering over submit")
+                try:
+                    self._human_mouse_move(submit_button)
+                    self._random_delay(0.3, 0.7, "hovering over submit")
+                except Exception as e:
+                    logger.debug(f"Mouse move failed: {e}")
 
                 logger.info("🚀 CLICKING SUBMIT...")
-                submit_button.click()
 
-                logger.info("✅ SUBMIT CLICKED!")
+                # Try multiple click strategies (element might be covered)
+                click_success = False
+
+                # Strategy 1: Normal click
+                try:
+                    submit_button.click()
+                    click_success = True
+                    logger.info("✅ SUBMIT CLICKED (normal click)")
+                except Exception as e:
+                    logger.debug(f"Normal click failed: {e}")
+
+                # Strategy 2: JavaScript click
+                if not click_success:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", submit_button)
+                        click_success = True
+                        logger.info("✅ SUBMIT CLICKED (JavaScript click)")
+                    except Exception as e:
+                        logger.debug(f"JS click failed: {e}")
+
+                # Strategy 3: ActionChains click
+                if not click_success:
+                    try:
+                        ActionChains(self.driver).move_to_element(submit_button).click().perform()
+                        click_success = True
+                        logger.info("✅ SUBMIT CLICKED (ActionChains)")
+                    except Exception as e:
+                        logger.debug(f"ActionChains click failed: {e}")
+
+                if not click_success:
+                    raise Exception("All click strategies failed")
+
+                logger.info("✅ Submit clicked successfully!")
 
                 # Wait for submission
                 self._random_delay(2, 4, "waiting for response")
