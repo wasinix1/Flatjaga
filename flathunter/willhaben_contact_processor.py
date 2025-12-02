@@ -12,6 +12,7 @@ import json
 import random
 from pathlib import Path
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 
 class WillhabenContactProcessor:
@@ -19,14 +20,15 @@ class WillhabenContactProcessor:
 
     @staticmethod
     def _calculate_business_hours_delay():
-        """Calculate delay if current time is outside business hours (00:00-06:00).
-        Returns delay in seconds to wait until 06:01-06:20 AM, or 0 if already in business hours."""
-        now = datetime.now()
+        """Calculate delay if current time is outside business hours (00:00-06:00 CET).
+        Returns delay in seconds to wait until 06:01-06:20 AM CET, or 0 if already in business hours."""
+        cet = ZoneInfo("Europe/Berlin")  # CET/CEST timezone
+        now = datetime.now(cet)
         current_hour = now.hour
 
-        # Check if we're in the night period (midnight to 6 AM)
+        # Check if we're in the night period (midnight to 6 AM CET)
         if 0 <= current_hour < 6:
-            # Calculate time until 6 AM
+            # Calculate time until 6 AM CET
             target_time = now.replace(hour=6, minute=0, second=0, microsecond=0)
             seconds_until_6am = (target_time - now).total_seconds()
 
@@ -35,7 +37,7 @@ class WillhabenContactProcessor:
             total_delay = seconds_until_6am + random_offset
 
             target_contact_time = now + timedelta(seconds=total_delay)
-            logger.info(f"⏰ Business hours delay: Listing picked up at {now.strftime('%H:%M:%S')}, will contact at {target_contact_time.strftime('%H:%M:%S')}")
+            logger.info(f"⏰ Business hours delay: Listing picked up at {now.strftime('%H:%M:%S %Z')}, will contact at {target_contact_time.strftime('%H:%M:%S %Z')}")
             return total_delay
 
         return 0
