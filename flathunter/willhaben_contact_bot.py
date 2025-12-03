@@ -660,9 +660,12 @@ class WillhabenContactBot:
             self.driver = self.stealth_driver.driver
             logger.info("Stealth browser started for Willhaben")
         else:
-            # Use regular Chrome
-            self.driver = webdriver.Chrome(options=self.options)
-            logger.info("Browser started for Willhaben")
+            # Use regular Chrome with webdriver-manager for auto version matching
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=self.options)
+            logger.info("Browser started for Willhaben (auto-matched ChromeDriver version)")
 
         self.wait = WebDriverWait(self.driver, 10)  # Default 10s timeout
         print("✓ Browser started")
