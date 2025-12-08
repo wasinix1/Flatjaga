@@ -107,8 +107,11 @@ class WillhabenContactBot:
             return False
     
     def start(self):
-        """Start the Chrome WebDriver"""
-        self.driver = webdriver.Chrome(options=self.options)
+        """Start the Chrome WebDriver with auto version matching"""
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=self.options)
         print("✓ Browser started")
     
     def close(self):
