@@ -24,73 +24,211 @@ __email__ = "harrymcfly@protonmail.com"
 __status__ = "Production"
 
 
-def check_saved_sessions():
-    """Check for saved sessions and prompt user for confirmation"""
-    sessions_found = []
+def get_session_info():
+    """Get information about saved sessions"""
+    sessions = {}
 
     # Check for willhaben session
     willhaben_cookies = Path.home() / '.willhaben_cookies.json'
     if willhaben_cookies.exists():
-        try:
-            with open(willhaben_cookies, 'r') as f:
-                cookies = json.load(f)
-                # Try to extract username or email if available in cookies
-                user_info = "saved session"
-                for cookie in cookies:
-                    if cookie.get('name') in ['username', 'email', 'user']:
-                        user_info = cookie.get('value', user_info)
-                        break
-                sessions_found.append(('willhaben', willhaben_cookies, user_info))
-        except:
-            # If we can't read the file, just show that it exists
-            sessions_found.append(('willhaben', willhaben_cookies, 'saved session'))
+        sessions['willhaben'] = {'path': willhaben_cookies, 'name': 'Willhaben'}
 
     # Check for wg-gesucht session
     wggesucht_cookies = Path.home() / '.wg_gesucht_cookies.json'
     if wggesucht_cookies.exists():
-        try:
-            with open(wggesucht_cookies, 'r') as f:
-                cookies = json.load(f)
-                # Try to extract username or email if available in cookies
-                user_info = "saved session"
-                for cookie in cookies:
-                    if cookie.get('name') in ['username', 'email', 'user']:
-                        user_info = cookie.get('value', user_info)
-                        break
-                sessions_found.append(('wg-gesucht', wggesucht_cookies, user_info))
-        except:
-            # If we can't read the file, just show that it exists
-            sessions_found.append(('wg-gesucht', wggesucht_cookies, 'saved session'))
+        sessions['wg-gesucht'] = {'path': wggesucht_cookies, 'name': 'WG-Gesucht'}
 
-    # If no sessions found, just continue
-    if not sessions_found:
+    return sessions
+
+
+def clear_session(service_key):
+    """Clear a specific session"""
+    sessions = get_session_info()
+    if service_key not in sessions:
+        print(f"  ✗ No {sessions.get(service_key, {}).get('name', service_key)} session found")
+        return False
+
+    try:
+        sessions[service_key]['path'].unlink()
+        print(f"  ✓ Cleared {sessions[service_key]['name']} session")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to clear {sessions[service_key]['name']} session: {e}")
+        return False
+
+
+def setup_session(service_key):
+    """Setup a specific session interactively"""
+    if service_key == 'willhaben':
+        print("\n" + "="*60)
+        print("WILLHABEN SESSION SETUP")
+        print("="*60)
+        try:
+            from flathunter.willhaben_contact_bot import WillhabenContactBot
+            bot = WillhabenContactBot(headless=False, use_stealth=False)
+            bot.start()
+
+            # Check if session already exists
+            if bot.load_cookies():
+                print("\n✓ Existing Willhaben session loaded successfully!")
+                print("\nTesting session...")
+                bot.driver.get('https://www.willhaben.at')
+                print("✓ Session appears to be valid\n")
+
+                response = input("Session exists. Re-login anyway? (y/N): ").strip().lower()
+                if response != 'y':
+                    print("Keeping existing session.")
+                    bot.close()
+                    return True
+
+            # Do manual login
+            bot.login_manual()
+            print("\n✓ Willhaben session saved!")
+            bot.close()
+            return True
+
+        except Exception as e:
+            print(f"\n✗ Error setting up Willhaben session: {e}")
+            return False
+
+    elif service_key == 'wg-gesucht':
+        print("\n" + "="*60)
+        print("WG-GESUCHT SESSION SETUP")
+        print("="*60)
+        try:
+            from flathunter.wg_gesucht_contact_bot import WgGesuchtContactBot
+
+            # Check if session already exists
+            cookie_file = Path.home() / '.wg_gesucht_cookies.json'
+            if cookie_file.exists():
+                print("\n✓ Existing WG-Gesucht session found!")
+                response = input("Session exists. Re-login anyway? (y/N): ").strip().lower()
+                if response != 'y':
+                    print("Keeping existing session.")
+                    return True
+
+                # Delete old session to force re-login
+                cookie_file.unlink()
+                print("Old session deleted. Proceeding with new login...\n")
+
+            # Initialize in non-headless mode for manual login
+            bot = WgGesuchtContactBot(headless=False, stealth_mode=False)
+            bot.start()
+
+            # Explicitly call manual login
+            bot._login_manual()
+            print("\n✓ WG-Gesucht session saved!")
+            bot.close()
+            return True
+
+        except Exception as e:
+            print(f"\n✗ Error setting up WG-Gesucht session: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    return False
+
+
+def session_manager_menu():
+    """Interactive session management menu"""
+    while True:
+        sessions = get_session_info()
+
+        print("\n" + "="*60)
+        print("SESSION MANAGER")
+        print("="*60)
+
+        if sessions:
+            print("\nCurrent sessions:")
+            if 'willhaben' in sessions:
+                print("  ✓ Willhaben")
+            if 'wg-gesucht' in sessions:
+                print("  ✓ WG-Gesucht")
+        else:
+            print("\n  No sessions found")
+
+        print("\n" + "="*60)
+        print("Options:")
+        print("  [1]  Setup Willhaben session")
+        print("  [2]  Setup WG-Gesucht session")
+        print("  [3]  Setup both sessions")
+        print("  [4]  Clear Willhaben session")
+        print("  [5]  Clear WG-Gesucht session")
+        print("  [6]  Clear all sessions")
+        print("  [c]  Continue with current sessions")
+        print("  [q]  Quit")
+        print("="*60)
+
+        choice = input("\nEnter your choice: ").strip().lower()
+
+        if choice == 'q':
+            print("\nExiting...")
+            import sys
+            sys.exit(0)
+        elif choice == 'c':
+            print("\nContinuing with current sessions...\n")
+            return
+        elif choice == '1':
+            setup_session('willhaben')
+        elif choice == '2':
+            setup_session('wg-gesucht')
+        elif choice == '3':
+            setup_session('willhaben')
+            setup_session('wg-gesucht')
+        elif choice == '4':
+            clear_session('willhaben')
+        elif choice == '5':
+            clear_session('wg-gesucht')
+        elif choice == '6':
+            clear_session('willhaben')
+            clear_session('wg-gesucht')
+        else:
+            print("\n✗ Invalid choice. Please try again.")
+
+
+def check_saved_sessions():
+    """Check for saved sessions and provide interactive options"""
+    sessions = get_session_info()
+
+    # If no sessions found, offer to set them up
+    if not sessions:
+        print("\n" + "="*60)
+        print("NO SESSIONS FOUND")
+        print("="*60)
+        print("\nYou need to setup sessions for auto-contact to work.")
+        response = input("\nSetup sessions now? (Y/n): ").strip().lower()
+
+        if response != 'n':
+            session_manager_menu()
+        else:
+            print("\nContinuing without sessions (auto-contact disabled)...\n")
         return
 
     # Show saved sessions and prompt
     print("\n" + "="*60)
     print("SAVED SESSIONS FOUND")
     print("="*60)
-    for service, path, info in sessions_found:
-        print(f"  • {service.upper()}: {info}")
+    for key, info in sessions.items():
+        print(f"  ✓ {info['name']}")
     print("="*60)
-    print("\nPress ENTER to use saved session(s), or 'x' to switch account: ", end='', flush=True)
+    print("\nOptions:")
+    print("  [ENTER]  Use saved sessions and continue")
+    print("  [x]      Clear/manage sessions")
+    print("  [s]      Setup/refresh sessions")
+    print("  [q]      Quit")
+    print("="*60)
 
-    response = input().strip().lower()
+    response = input("\nChoice: ").strip().lower()
 
-    if response == 'x':
-        print("\nClearing saved sessions...")
-        for service, path, _ in sessions_found:
-            try:
-                path.unlink()
-                print(f"  ✓ Cleared {service} session")
-            except Exception as e:
-                logger.error(f"Failed to clear {service} session: {e}")
-        print("\nYou can now login with a different account.")
-        print("Run 'python setup_sessions.py' to login and setup new sessions.\n")
+    if response == 'q':
+        print("\nExiting...")
         import sys
         sys.exit(0)
+    elif response == 'x' or response == 's':
+        session_manager_menu()
     else:
-        print("Using saved session(s)...\n")
+        print("\nUsing saved sessions...\n")
 
 
 def launch_flat_hunt(config, heartbeat: Heartbeat):

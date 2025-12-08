@@ -14,9 +14,9 @@ def setup_willhaben():
     print("="*60)
 
     try:
-        from willhaben_contact_bot import WillhabenContactBot
+        from flathunter.willhaben_contact_bot import WillhabenContactBot
 
-        bot = WillhabenContactBot(headless=False)
+        bot = WillhabenContactBot(headless=False, use_stealth=False)
         bot.start()
 
         # Check if session already exists
