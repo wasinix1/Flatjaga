@@ -552,9 +552,36 @@ class WgGesuchtContactBot:
                     if not is_enabled:
                         logger.info(f"        ⚠ Element not enabled, but will try to click anyway")
 
-                    # Try to click with verbose logging
-                    logger.info(f"        → Attempting to click element...")
-                    if self._click_element_verbose(element, "template button"):
+                    # Try sophisticated JS click with full event dispatch
+                    logger.info(f"        → Attempting sophisticated JS click (full events)...")
+                    try:
+                        # Dispatch complete mouse event sequence with proper properties
+                        self.driver.execute_script("""
+                            var element = arguments[0];
+                            var rect = element.getBoundingClientRect();
+                            var centerX = rect.left + rect.width / 2;
+                            var centerY = rect.top + rect.height / 2;
+
+                            // Full event sequence: mousedown → mouseup → click
+                            ['mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(function(eventType) {
+                                var event = new MouseEvent(eventType, {
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: centerX,
+                                    clientY: centerY,
+                                    screenX: centerX + window.screenX,
+                                    screenY: centerY + window.screenY,
+                                    button: 0,
+                                    buttons: eventType === 'mousedown' ? 1 : 0
+                                });
+                                element.dispatchEvent(event);
+                            });
+                        """, element)
+
+                        logger.info(f"        ✓ Sophisticated JS click dispatched")
+                        time.sleep(0.2)  # Let events propagate
+
                         # Verify modal opened
                         logger.info(f"        → Verifying modal opened...")
                         if self._verify_modal_opened(timeout=3):
@@ -563,8 +590,8 @@ class WgGesuchtContactBot:
                         else:
                             logger.warning(f"        ✗ Click succeeded but modal didn't open")
                             logger.info(f"        → Continuing to next strategy...")
-                    else:
-                        logger.warning(f"        ✗ All click strategies failed for this element")
+                    except Exception as e:
+                        logger.warning(f"        ✗ Sophisticated click failed: {type(e).__name__}")
                         logger.info(f"        → Continuing to next strategy...")
 
                 except NoSuchElementException:
@@ -583,7 +610,7 @@ class WgGesuchtContactBot:
 
                 if is_displayed:
                     logger.info(f"      → Clicking dropdown button...")
-                    if self._click_element_verbose(dropdown_btn, "conversation controls dropdown"):
+                    if self._click_element(dropdown_btn, "dropdown"):
                         logger.info(f"      ✓ Dropdown menu opened")
                         self._random_delay(action_type="micro")
 
@@ -594,7 +621,7 @@ class WgGesuchtContactBot:
                                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
                             )
                             logger.info(f"      ✓ Template link found, clicking...")
-                            if self._click_element_verbose(template_link, "template link"):
+                            if self._click_element(template_link, "template link"):
                                 # Verify modal opened
                                 logger.info(f"      → Verifying modal opened...")
                                 if self._verify_modal_opened(timeout=3):
