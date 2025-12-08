@@ -1044,7 +1044,36 @@ class WgGesuchtContactBot:
 
                 except Exception as e:
                     logger.warning(f"  ⚠ Modal template insertion failed: {e}")
-                    logger.warning("  → Will try direct fill fallback...")
+                    logger.warning("  → Closing modal before fallback...")
+
+                    # Close modal to prevent overlay conflicts
+                    try:
+                        # Try common close button selectors
+                        close_selectors = [
+                            (By.XPATH, "//button[contains(@class, 'close')]"),
+                            (By.XPATH, "//span[@aria-hidden='true' and contains(text(), '×')]"),
+                            (By.XPATH, "//button[contains(text(), '×')]"),
+                            (By.CSS_SELECTOR, "button.close"),
+                        ]
+
+                        modal_closed = False
+                        for selector_type, selector_value in close_selectors:
+                            try:
+                                close_btn = self.driver.find_element(selector_type, selector_value)
+                                if close_btn.is_displayed():
+                                    close_btn.click()
+                                    time.sleep(0.3)  # Let modal close animation complete
+                                    logger.info(f"  ✓ Closed modal")
+                                    modal_closed = True
+                                    break
+                            except:
+                                continue
+
+                        if not modal_closed:
+                            logger.debug(f"  → No close button found (modal may auto-close)")
+
+                    except Exception as close_error:
+                        logger.debug(f"  → Could not close modal: {close_error} (proceeding anyway)")
 
             # If modal failed OR template insertion failed, use direct fill fallback
             if not message_filled:
