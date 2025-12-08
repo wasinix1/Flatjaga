@@ -992,8 +992,10 @@ class WgGesuchtContactBot:
             logger.info("  → Opening template modal...")
             modal_opened = self._find_and_click_template_button()
 
+            message_filled = False  # Track if message was successfully filled
+
             if modal_opened:
-                # Modal approach succeeded - select and insert template
+                # Modal approach succeeded - try to select and insert template
                 logger.info(f"  → Selecting template {self.template_index}...")
                 try:
                     # Wait longer for templates to load (modal can be slow)
@@ -1013,43 +1015,40 @@ class WgGesuchtContactBot:
                             time.sleep(poll_interval)
 
                     if not labels or len(labels) <= self.template_index:
-                        logger.error(f"  ✗ Template {self.template_index} not found after {max_wait}s (only {len(labels) if labels else 0} available)")
-                        return False
+                        logger.warning(f"  ⚠ Template {self.template_index} not found after {max_wait}s (only {len(labels) if labels else 0} available)")
+                        raise Exception("Template not found in modal")
 
                     logger.info(f"  → Clicking template {self.template_index}...")
                     label = labels[self.template_index]
                     if not self._click_element(label, f"template {self.template_index}"):
-                        logger.error("  ✗ Could not select template")
-                        return False
+                        logger.warning("  ⚠ Could not select template")
+                        raise Exception("Could not click template label")
 
                     logger.info(f"  ✓ Selected template {self.template_index}")
 
-                except Exception as e:
-                    logger.error(f"  ✗ Could not select template: {e}")
-                    return False
+                    self._random_delay(action_type="thinking")
 
-                self._random_delay(action_type="thinking")
-
-                # Insert template
-                logger.info("  → Looking for insert button...")
-                try:
+                    # Insert template
+                    logger.info("  → Looking for insert button...")
                     insert_btn = WebDriverWait(self.driver, timeout).until(
                         EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
                     )
                     logger.info("  → Found insert button, clicking...")
                     if not self._click_element(insert_btn, "insert button"):
-                        logger.error("  ✗ Could not click insert button")
-                        return False
+                        logger.warning("  ⚠ Could not click insert button")
+                        raise Exception("Could not click insert button")
+
                     logger.info("  ✓ Template inserted into message field")
-                except TimeoutException:
-                    logger.error("  ✗ Insert button not found within timeout")
-                    return False
+                    message_filled = True  # Modal approach succeeded!
+                    self._random_delay(action_type="thinking")
 
-                self._random_delay(action_type="thinking")
+                except Exception as e:
+                    logger.warning(f"  ⚠ Modal template insertion failed: {e}")
+                    logger.warning("  → Will try direct fill fallback...")
 
-            else:
-                # Modal approach failed - use direct fill fallback
-                logger.warning("  ⚠ Modal approach failed, using direct fill fallback...")
+            # If modal failed OR template insertion failed, use direct fill fallback
+            if not message_filled:
+                logger.warning("  ⚠ Using direct fill fallback...")
                 if not self._fill_message_directly():
                     logger.error("  ✗ Both modal and direct fill approaches failed")
                     return False
