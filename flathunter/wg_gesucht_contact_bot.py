@@ -680,9 +680,13 @@ class WgGesuchtContactBot:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        self.driver = webdriver.Chrome(options=chrome_options)
+        # Use webdriver-manager for auto version matching
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=chrome_options)
         mode = "stealth (fallback)" if self.stealth_mode else "regular"
-        logger.info(f"Chrome driver initialized ({mode} mode)")
+        logger.info(f"Chrome driver initialized ({mode} mode, auto-matched version)")
 
     def load_cookies(self):
         """Load saved session cookies. Returns True if session is valid."""
