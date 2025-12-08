@@ -996,18 +996,24 @@ class WgGesuchtContactBot:
                 # Modal approach succeeded - select and insert template
                 logger.info(f"  → Selecting template {self.template_index}...")
                 try:
+                    # Wait longer for templates to load (modal can be slow)
                     labels = None
-                    for check_attempt in range(5):
+                    max_wait = 10  # seconds
+                    poll_interval = 0.5  # check every 0.5s
+                    attempts = int(max_wait / poll_interval)
+
+                    for check_attempt in range(attempts):
                         labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
                         if labels and len(labels) > self.template_index:
-                            logger.info(f"  ✓ Found {len(labels)} templates (check #{check_attempt+1})")
+                            logger.info(f"  ✓ Found {len(labels)} templates after {(check_attempt + 1) * poll_interval:.1f}s")
                             break
-                        if check_attempt < 4:
-                            logger.info(f"  → Templates not ready yet (found {len(labels) if labels else 0}), retrying...")
-                            time.sleep(0.3)
+                        if check_attempt < attempts - 1:
+                            if check_attempt % 4 == 0:  # Log every 2 seconds
+                                logger.info(f"  → Templates not ready yet (found {len(labels) if labels else 0}), retrying... ({(check_attempt + 1) * poll_interval:.1f}s elapsed)")
+                            time.sleep(poll_interval)
 
                     if not labels or len(labels) <= self.template_index:
-                        logger.error(f"  ✗ Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
+                        logger.error(f"  ✗ Template {self.template_index} not found after {max_wait}s (only {len(labels) if labels else 0} available)")
                         return False
 
                     logger.info(f"  → Clicking template {self.template_index}...")
