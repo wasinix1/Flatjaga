@@ -459,20 +459,19 @@ class WgGesuchtContactBot:
             logger.error(f"  ✗ Could not find message textarea with any selector")
             return False
 
-        # Fill textarea
+        # Fill textarea with human-like typing (avoid bot detection)
         logger.info(f"  → Filling textarea with template ({len(template_text)} chars)...")
         try:
             # Clear first
             textarea.clear()
-            time.sleep(0.1)
 
-            # Fill with template
-            if self.stealth_mode:
-                # Use human typing in stealth mode
-                HumanBehavior.human_type(textarea, template_text, self.driver)
-            else:
-                # Direct fill (faster)
-                textarea.send_keys(template_text)
+            # Human hesitation before starting (looks like reading template)
+            time.sleep(random.uniform(0.3, 0.8))
+
+            # ALWAYS use human typing for direct fill (wgg_input may monitor for bots)
+            # This creates realistic keystroke timing, events, and variations
+            logger.info(f"  → Using human-like typing to avoid detection...")
+            HumanBehavior.human_type(textarea, template_text, self.driver)
 
             # Verify content
             content = textarea.get_attribute('value') or ''
