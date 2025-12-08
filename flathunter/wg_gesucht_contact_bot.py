@@ -371,6 +371,122 @@ class WgGesuchtContactBot:
                 logger.info(f"          ✗ Fallback check failed: {type(e).__name__}")
                 return False
 
+    def _load_template_from_file(self):
+        """
+        Load template text from message_templates.json file.
+
+        Uses template_index to select from templates array, or falls back to active_template_id.
+
+        Returns:
+            str: Template text, or None if loading failed
+        """
+        try:
+            template_file = Path(__file__).parent / 'config' / 'message_templates.json'
+
+            if not template_file.exists():
+                logger.warning(f"  → Template file not found: {template_file}")
+                return None
+
+            with open(template_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            templates = data.get('templates', [])
+
+            if not templates:
+                logger.warning(f"  → No templates found in file")
+                return None
+
+            # Try to use template_index first
+            if 0 <= self.template_index < len(templates):
+                template_text = templates[self.template_index].get('text', '')
+                logger.info(f"  → Loaded template {self.template_index} from file ({len(template_text)} chars)")
+                return template_text
+
+            # Fallback: use active_template_id
+            active_id = data.get('active_template_id')
+            if active_id:
+                for template in templates:
+                    if template.get('id') == active_id:
+                        template_text = template.get('text', '')
+                        logger.info(f"  → Loaded active template (id={active_id}) from file ({len(template_text)} chars)")
+                        return template_text
+
+            # Last resort: use first template
+            template_text = templates[0].get('text', '')
+            logger.info(f"  → Loaded first template from file ({len(template_text)} chars)")
+            return template_text
+
+        except Exception as e:
+            logger.error(f"  → Failed to load template from file: {type(e).__name__}: {str(e)[:100]}")
+            return None
+
+    def _fill_message_directly(self):
+        """
+        FALLBACK: Bypass template modal and fill message textarea directly from file.
+
+        This is used when the template button/modal approach fails.
+        More reliable since it doesn't depend on modal UI.
+
+        Returns:
+            True if message was filled successfully, False otherwise
+        """
+        logger.info(f"  → FALLBACK: Filling message field directly (bypassing modal)")
+
+        # Load template from file
+        template_text = self._load_template_from_file()
+        if not template_text:
+            logger.error(f"  ✗ Could not load template text from file")
+            return False
+
+        # Find message textarea
+        logger.info(f"  → Looking for message textarea...")
+        textarea_selectors = [
+            (By.ID, "message_input"),
+            (By.CSS_SELECTOR, "textarea[name='content']"),
+            (By.CSS_SELECTOR, "textarea.form-control.wgg_input"),
+        ]
+
+        textarea = None
+        for selector_type, selector_value in textarea_selectors:
+            try:
+                textarea = self.driver.find_element(selector_type, selector_value)
+                logger.info(f"  ✓ Found textarea using {selector_type}={selector_value}")
+                break
+            except NoSuchElementException:
+                continue
+
+        if not textarea:
+            logger.error(f"  ✗ Could not find message textarea with any selector")
+            return False
+
+        # Fill textarea
+        logger.info(f"  → Filling textarea with template ({len(template_text)} chars)...")
+        try:
+            # Clear first
+            textarea.clear()
+            time.sleep(0.1)
+
+            # Fill with template
+            if self.stealth_mode:
+                # Use human typing in stealth mode
+                HumanBehavior.human_type(textarea, template_text, self.driver)
+            else:
+                # Direct fill (faster)
+                textarea.send_keys(template_text)
+
+            # Verify content
+            content = textarea.get_attribute('value') or ''
+            if len(content) >= len(template_text) * 0.9:  # Allow 10% variance
+                logger.info(f"  ✓ Message filled successfully ({len(content)} chars)")
+                return True
+            else:
+                logger.warning(f"  ⚠ Message may not be fully filled (expected ~{len(template_text)}, got {len(content)})")
+                return True  # Continue anyway
+
+        except Exception as e:
+            logger.error(f"  ✗ Failed to fill textarea: {type(e).__name__}: {str(e)[:100]}")
+            return False
+
     def _find_and_click_template_button(self, max_attempts=3):
         """
         Find and click template button with comprehensive logging and fallback strategies.
@@ -873,61 +989,67 @@ class WgGesuchtContactBot:
             except Exception as e:
                 logger.warning(f"  → Security popup handling failed: {type(e).__name__}: {str(e)[:80]}")
 
-            # STEP 5: Find and click template button (with comprehensive logging)
+            # STEP 5: Fill message field (modal approach with direct fallback)
             logger.info("  → Opening template modal...")
-            if not self._find_and_click_template_button():
-                return False
+            modal_opened = self._find_and_click_template_button()
 
-            # Modal is now open and verified by _find_and_click_template_button
-            self._random_delay(action_type="thinking")
+            if modal_opened:
+                # Modal approach succeeded - select and insert template
+                logger.info(f"  → Selecting template {self.template_index}...")
+                try:
+                    labels = None
+                    for check_attempt in range(5):
+                        labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
+                        if labels and len(labels) > self.template_index:
+                            logger.info(f"  ✓ Found {len(labels)} templates (check #{check_attempt+1})")
+                            break
+                        if check_attempt < 4:
+                            logger.info(f"  → Templates not ready yet (found {len(labels) if labels else 0}), retrying...")
+                            time.sleep(0.3)
 
-            # Select template
-            logger.info(f"  → Selecting template {self.template_index}...")
-            try:
-                labels = None
-                for check_attempt in range(5):
-                    labels = self.driver.find_elements(By.CLASS_NAME, "message_template_label")
-                    if labels and len(labels) > self.template_index:
-                        logger.info(f"  ✓ Found {len(labels)} templates (check #{check_attempt+1})")
-                        break
-                    if check_attempt < 4:
-                        logger.info(f"  → Templates not ready yet (found {len(labels) if labels else 0}), retrying...")
-                        time.sleep(0.3)
+                    if not labels or len(labels) <= self.template_index:
+                        logger.error(f"  ✗ Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
+                        return False
 
-                if not labels or len(labels) <= self.template_index:
-                    logger.error(f"  ✗ Template {self.template_index} not found (only {len(labels) if labels else 0} available)")
+                    logger.info(f"  → Clicking template {self.template_index}...")
+                    label = labels[self.template_index]
+                    if not self._click_element(label, f"template {self.template_index}"):
+                        logger.error("  ✗ Could not select template")
+                        return False
+
+                    logger.info(f"  ✓ Selected template {self.template_index}")
+
+                except Exception as e:
+                    logger.error(f"  ✗ Could not select template: {e}")
                     return False
 
-                logger.info(f"  → Clicking template {self.template_index}...")
-                label = labels[self.template_index]
-                if not self._click_element(label, f"template {self.template_index}"):
-                    logger.error("  ✗ Could not select template")
+                self._random_delay(action_type="thinking")
+
+                # Insert template
+                logger.info("  → Looking for insert button...")
+                try:
+                    insert_btn = WebDriverWait(self.driver, timeout).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
+                    )
+                    logger.info("  → Found insert button, clicking...")
+                    if not self._click_element(insert_btn, "insert button"):
+                        logger.error("  ✗ Could not click insert button")
+                        return False
+                    logger.info("  ✓ Template inserted into message field")
+                except TimeoutException:
+                    logger.error("  ✗ Insert button not found within timeout")
                     return False
 
-                logger.info(f"  ✓ Selected template {self.template_index}")
+                self._random_delay(action_type="thinking")
 
-            except Exception as e:
-                logger.error(f"  ✗ Could not select template: {e}")
-                return False
-
-            self._random_delay(action_type="thinking")
-
-            # Insert template
-            logger.info("  → Looking for insert button...")
-            try:
-                insert_btn = WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "use_message_template"))
-                )
-                logger.info("  → Found insert button, clicking...")
-                if not self._click_element(insert_btn, "insert button"):
-                    logger.error("  ✗ Could not click insert button")
+            else:
+                # Modal approach failed - use direct fill fallback
+                logger.warning("  ⚠ Modal approach failed, using direct fill fallback...")
+                if not self._fill_message_directly():
+                    logger.error("  ✗ Both modal and direct fill approaches failed")
                     return False
-                logger.info("  ✓ Template inserted into message field")
-            except TimeoutException:
-                logger.error("  ✗ Insert button not found within timeout")
-                return False
 
-            self._random_delay(action_type="thinking")
+                self._random_delay(action_type="thinking")
 
             # Verify template insertion (optional, best effort)
             try:
