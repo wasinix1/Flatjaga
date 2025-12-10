@@ -51,7 +51,17 @@ def test_archive_for_url(listing_url: str, config_path: str = None):
         if config_path:
             config = Config(config_path)
         else:
-            config = Config()
+            # Try to find config.yaml in current directory
+            import os
+            default_config = 'config.yaml'
+            if os.path.exists(default_config):
+                print(f"Using config file: {default_config}")
+                config = Config(default_config)
+            else:
+                print(f"⚠️  No config.yaml found in current directory")
+                print(f"   Please provide config path: python archive_test.py URL config.yaml")
+                print(f"   Or set FLATHUNTER_TARGET_URLS environment variable\n")
+                return False
 
         # Check if archive is enabled
         if not config.get('telegram_archive_contacted', False):
@@ -206,9 +216,10 @@ def test_archive_for_url(listing_url: str, config_path: str = None):
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: python archive_test.py \"LISTING_URL\" [config_path]")
-        print(f"\nExample:")
+        print(f"\nExamples:")
         print(f"  python archive_test.py \"https://www.willhaben.at/iad/immobilien/d/wohnung/...\"")
-        print(f"  python archive_test.py \"https://www.wg-gesucht.de/...\" config.yaml")
+        print(f"  python archive_test.py \"https://www.wg-gesucht.de/...\" /path/to/config.yaml")
+        print(f"\nNote: If config_path is not provided, looks for config.yaml in current directory")
         sys.exit(1)
 
     listing_url = sys.argv[1]
