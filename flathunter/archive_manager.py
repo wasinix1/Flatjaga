@@ -140,15 +140,13 @@ class ArchiveManager:
             # Extract images - WG-Gesucht specific (only apartment photos)
             images = []
 
-            # Only extract sp-image class (apartment gallery photos)
+            # Only extract sp-image class (apartment gallery photos - this class only appears on photos)
             gallery_imgs = soup.find_all('img', class_='sp-image')
             for img in gallery_imgs:
-                # Only use data-large for best quality
-                src = img.get('data-large', '')
+                # Try data-default first (always has large image), fallback to data-large
+                src = img.get('data-default') or img.get('data-large', '')
 
-                # Filter out maps, icons, and other non-photo images
-                if src and src.startswith('http') and '/media/up/' in src:
-                    # Only apartment photos have /media/up/ in the URL
+                if src and src.startswith('http'):
                     images.append(src)
 
             # Remove duplicates while preserving order
