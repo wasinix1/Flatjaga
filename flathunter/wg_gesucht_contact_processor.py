@@ -52,7 +52,8 @@ class WgGesuchtContactProcessor:
             wg_gesucht_headless: bool - Run in headless mode (default True)
             wg_gesucht_delay_min: float - Minimum delay between actions (default 0.5)
             wg_gesucht_delay_max: float - Maximum delay between actions (default 1.5)
-            wg_gesucht_stealth_mode: bool - Enable stealth mode with undetected-chromedriver (default False)
+            wg_gesucht_stealth_mode: bool - Enable stealth mode with undetected-chromedriver as fallback (default False)
+                                            Note: Session validation always uses normal chromedriver regardless of this setting
         """
         self.config = config
         self.bot = None
@@ -299,15 +300,16 @@ class WgGesuchtContactProcessor:
         logger.info("WG-Gesucht session validation needed (2+ hours elapsed)")
 
         # Start browser with headless=false for stability
+        # Use normal chromedriver (stealth_mode=False) for session validation
         temp_bot = None
         try:
-            logger.info("Opening browser for session validation (headless=false)...")
+            logger.info("Opening browser for session validation (headless=false, normal chromedriver)...")
             temp_bot = WgGesuchtContactBot(
                 headless=False,
                 template_index=self.template_index,
                 delay_min=self.delay_min,
                 delay_max=self.delay_max,
-                stealth_mode=self.stealth_mode
+                stealth_mode=False  # Always use normal chromedriver for session validation
             )
             temp_bot.start()
 
