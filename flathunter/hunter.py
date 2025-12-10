@@ -17,6 +17,10 @@ from flathunter.wg_gesucht_contact_processor import WgGesuchtContactProcessor
 from flathunter.notifiers import SenderTelegram
 from flathunter.session_manager import SessionManager
 
+# Archive feature (optional)
+from flathunter.archive_manager import ArchiveManager
+from flathunter.telegram_archive_handler import TelegramArchiveHandler
+
 class Hunter:
     """Basic methods for crawling and processing / filtering exposes"""
 
@@ -50,6 +54,25 @@ class Hunter:
         self.wg_gesucht_processor = WgGesuchtContactProcessor(
             config, self.telegram_notifier, id_watch, self.session_manager
         )
+
+        # Initialize archive components (optional feature, fail-safe)
+        self.archive_manager = None
+        self.telegram_archive_handler = None
+        self.archive_enabled = False
+
+        try:
+            if self.config.get('telegram_archive_contacted', False) and self.telegram_notifier:
+                self.archive_manager = ArchiveManager(config)
+                self.telegram_archive_handler = TelegramArchiveHandler(
+                    bot_token=self.telegram_notifier.bot_token,
+                    sender_telegram=self.telegram_notifier
+                )
+                # Start polling for callback queries
+                self.telegram_archive_handler.start_polling()
+                self.archive_enabled = True
+                logger.info("✓ Archive feature enabled - will store contacted listings")
+        except Exception as e:
+            logger.warning(f"Could not initialize archive feature (continuing without it): {e}")
 
 
     def get_crawler_delay(self, crawler_name: str) -> int:
@@ -147,11 +170,68 @@ class Hunter:
             logger.warning("Cannot send success notification - telegram notifier not initialized")
             return
 
+        title = expose.get('title', 'Unknown listing')
+        success_message = f"✅ Kontaktiert\n{title}"
+
+        # Try archive feature if enabled (fail-safe: falls back to regular notification)
+        if self.archive_enabled:
+            try:
+                # Extract archive data from page HTML
+                page_html = expose.get('_archive_html')
+                listing_url = expose.get('_archive_url') or expose.get('url')
+
+                if page_html and listing_url:
+                    # Extract images and description
+                    archive_data = self.archive_manager.extract_archive_data(
+                        page_html, listing_url, expose
+                    )
+
+                    if archive_data:
+                        # Store archive and send with button for all receivers
+                        success_count = 0
+                        for receiver_id in self.telegram_notifier.receiver_ids:
+                            try:
+                                archive_id = self.telegram_archive_handler.store_archive(
+                                    archive_data, receiver_id
+                                )
+
+                                if archive_id:
+                                    # Send message with inline button
+                                    result = self.telegram_notifier.send_with_inline_button(
+                                        chat_id=receiver_id,
+                                        message=success_message,
+                                        button_text="📷 View Archive",
+                                        callback_data=f"archive:{archive_id}"
+                                    )
+
+                                    if result:
+                                        success_count += 1
+                                        logger.info(f"✓ Sent success notification with archive button for: {title}")
+
+                                        # Optional: save locally (only once, not per receiver)
+                                        if success_count == 1:
+                                            try:
+                                                self.archive_manager.save_archive_locally(archive_data, archive_id)
+                                            except Exception as e:
+                                                logger.warning(f"Could not save archive locally: {e}")
+
+                            except Exception as e:
+                                logger.warning(f"Archive failed for receiver {receiver_id}: {e}")
+                                # Will fall through to regular notification
+
+                        # If all receivers got the archive button, we're done
+                        if success_count == len(self.telegram_notifier.receiver_ids):
+                            return
+                    else:
+                        logger.warning("Could not extract archive data - falling back to regular notification")
+                else:
+                    logger.debug("No archive HTML available - falling back to regular notification")
+
+            except Exception as e:
+                logger.warning(f"Archive feature error (falling back to regular notification): {e}")
+
+        # Fallback: regular notification without button
         try:
-            title = expose.get('title', 'Unknown listing')
-
-            success_message = f"✅ Kontaktiert\n{title}"
-
             self.telegram_notifier.notify(success_message)
             logger.info(f"✓ Sent success notification for: {title}")
         except Exception as e:
