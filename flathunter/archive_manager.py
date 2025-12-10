@@ -140,14 +140,27 @@ class ArchiveManager:
             # Extract images - WG-Gesucht specific
             images = []
 
-            # Strategy 1: Gallery images
-            gallery_imgs = soup.find_all('img', class_=re.compile(r'(gallery|sp-image)', re.I))
+            # Strategy 1: sp-image class with data attributes (preferred for quality)
+            gallery_imgs = soup.find_all('img', class_='sp-image')
             for img in gallery_imgs:
-                src = img.get('src', '') or img.get('data-src', '')
+                # Prefer data-large (best quality), fallback to data-default or src
+                src = (img.get('data-large') or
+                       img.get('data-default') or
+                       img.get('data-medium') or
+                       img.get('src') or
+                       img.get('data-src', ''))
                 if src and src.startswith('http'):
                     images.append(src)
 
-            # Strategy 2: All images with wg-gesucht domain
+            # Strategy 2: Gallery images with generic class
+            if not images:
+                gallery_imgs = soup.find_all('img', class_=re.compile(r'gallery', re.I))
+                for img in gallery_imgs:
+                    src = img.get('src', '') or img.get('data-src', '')
+                    if src and src.startswith('http'):
+                        images.append(src)
+
+            # Strategy 3: All images with wg-gesucht domain
             if not images:
                 all_imgs = soup.find_all('img')
                 for img in all_imgs:
@@ -155,28 +168,44 @@ class ArchiveManager:
                     if 'wg-gesucht' in src and src.startswith('http'):
                         images.append(src)
 
-            # Remove duplicates
+            # Remove duplicates while preserving order
             seen = set()
             images = [x for x in images if not (x in seen or seen.add(x))]
 
             logger.info(f"Extracted {len(images)} images from WG-Gesucht listing")
 
-            # Extract description - multiple possible selectors
+            # Extract description - WG-Gesucht uses freitext divs with <p> tags
             description = ""
 
-            # Try common description containers
-            desc_selectors = [
-                {'class': re.compile(r'freitext', re.I)},
-                {'id': re.compile(r'description|freitext', re.I)},
-                {'class': re.compile(r'description', re.I)},
-            ]
+            # Strategy 1: Find freitext divs and extract all <p> tags
+            freitext_divs = soup.find_all('div', class_=re.compile(r'section_freetext', re.I))
+            if freitext_divs:
+                desc_parts = []
+                for div in freitext_divs:
+                    # Get all <p> tags inside this div (ignore ads)
+                    paragraphs = div.find_all('p', class_=lambda x: not x or 'ad' not in x.lower())
+                    for p in paragraphs:
+                        text = p.get_text(strip=True)
+                        if text and len(text) > 10:  # Filter out very short/empty paragraphs
+                            desc_parts.append(text)
 
-            for selector in desc_selectors:
-                desc_div = soup.find('div', selector)
+                if desc_parts:
+                    description = '\n\n'.join(desc_parts)
+                    logger.info(f"Extracted description ({len(description)} chars) from {len(desc_parts)} paragraphs")
+
+            # Strategy 2: Fallback to freitext div text
+            if not description:
+                freitext_div = soup.find('div', id=re.compile(r'freitext', re.I))
+                if freitext_div:
+                    description = freitext_div.get_text(separator='\n', strip=True)
+                    logger.info(f"Extracted description ({len(description)} chars) using fallback")
+
+            # Strategy 3: Generic description container
+            if not description:
+                desc_div = soup.find('div', id='ad_description_text')
                 if desc_div:
                     description = desc_div.get_text(separator='\n', strip=True)
-                    logger.info(f"Extracted description ({len(description)} chars)")
-                    break
+                    logger.info(f"Extracted description ({len(description)} chars) from generic container")
 
             if not description:
                 logger.warning("Could not find description in WG-Gesucht page")
