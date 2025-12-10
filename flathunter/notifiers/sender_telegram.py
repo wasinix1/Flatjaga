@@ -176,3 +176,129 @@ class SenderTelegram(Processor, Notifier):
             address=expose.get('address', 'N/A'),
             durations=expose.get('durations', 'N/A')
         ).strip()
+
+    # Archive-related methods (optional feature)
+
+    def send_with_inline_button(self, chat_id: int, message: str, button_text: str, callback_data: str) -> Optional[Dict]:
+        """
+        Send a text message with an inline button
+
+        Args:
+            chat_id: Telegram chat ID
+            message: Message text
+            button_text: Text on the button
+            callback_data: Data to send when button is clicked
+
+        Returns:
+            Sent message dict or None on failure
+        """
+        try:
+            # Build inline keyboard
+            keyboard = {
+                'inline_keyboard': [[
+                    {
+                        'text': button_text,
+                        'callback_data': callback_data
+                    }
+                ]]
+            }
+
+            payload = {
+                'chat_id': str(chat_id),
+                'text': message,
+                'reply_markup': json.dumps(keyboard)
+            }
+
+            response = requests.post(self.__text_message_url, data=payload, timeout=30)
+
+            if response.status_code != 200:
+                logger.warning(f"Failed to send message with button: {response.status_code}")
+                self.__handle_error("When sending message with inline button, we got an error.",
+                    response, chat_id)
+                return None
+
+            return response.json().get('result', {})
+
+        except Exception as e:
+            logger.error(f"Error sending message with inline button: {e}", exc_info=True)
+            return None
+
+    def send_archive_reply(self, chat_id: int, reply_to_message_id: int, images: List[str], description_text: str):
+        """
+        Send archive (images + description) as reply to a message
+
+        Args:
+            chat_id: Telegram chat ID
+            reply_to_message_id: Message ID to reply to
+            images: List of image URLs
+            description_text: Description text to send with first image batch
+
+        Returns:
+            None
+        """
+        try:
+            # Send images in chunks of 10 (Telegram limit)
+            image_chunks = list(chunk_list(images, 10))
+
+            for idx, chunk in enumerate(image_chunks):
+                payload = {
+                    'chat_id': str(chat_id),
+                    'reply_to_message_id': reply_to_message_id,
+                    'disable_notification': True,
+                }
+
+                # Add description as caption on first batch only
+                if idx == 0 and description_text:
+                    # Telegram caption limit is 1024 chars
+                    caption = description_text[:1024]
+                    media = [{"type": "photo", "media": chunk[0], "caption": caption}]
+                    media.extend([{"type": "photo", "media": url} for url in chunk[1:]])
+                else:
+                    media = [{"type": "photo", "media": url} for url in chunk]
+
+                payload['media'] = json.dumps(media)
+
+                response = requests.post(self.__media_group_url, data=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.warning(f"Error sending archive media group (chunk {idx+1}/{len(image_chunks)}): {response.status_code}")
+                    self.__handle_error(
+                        "When sending archive media group, we got an error.",
+                        response=response,
+                        chat_id=str(chat_id)
+                    )
+                    return
+
+            logger.info(f"Sent archive with {len(images)} images in {len(image_chunks)} batches")
+
+        except Exception as e:
+            logger.error(f"Error sending archive reply: {e}", exc_info=True)
+
+    def send_text_reply(self, chat_id: int, reply_to_message_id: int, text: str):
+        """
+        Send a text message as reply to another message
+
+        Args:
+            chat_id: Telegram chat ID
+            reply_to_message_id: Message ID to reply to
+            text: Message text
+
+        Returns:
+            None
+        """
+        try:
+            payload = {
+                'chat_id': str(chat_id),
+                'text': text,
+                'reply_to_message_id': reply_to_message_id
+            }
+
+            response = requests.post(self.__text_message_url, data=payload, timeout=30)
+
+            if response.status_code != 200:
+                logger.warning(f"Failed to send text reply: {response.status_code}")
+                self.__handle_error("When sending text reply, we got an error.",
+                    response, chat_id)
+
+        except Exception as e:
+            logger.error(f"Error sending text reply: {e}", exc_info=True)

@@ -429,6 +429,14 @@ class WillhabenContactProcessor:
                         logger.debug(f"Contact successful ({elapsed:.1f}s, total: {self.total_contacted})")
                         expose['_auto_contacted'] = True
 
+                        # Store page source for archiving (optional feature)
+                        try:
+                            if self.bot.driver:
+                                expose['_archive_html'] = self.bot.driver.page_source
+                                expose['_archive_url'] = url
+                        except Exception as e:
+                            logger.warning(f"Could not capture page source for archiving: {e}")
+
                         # Mark title as contacted to prevent duplicates across platforms
                         if self.id_watch:
                             self.id_watch.mark_title_contacted(expose)
@@ -555,6 +563,14 @@ class WillhabenContactProcessor:
                         self.total_contacted += 1
                         logger.info(f"✓ Contacted successfully with visible browser ({elapsed:.1f}s, total: {self.total_contacted})")
                         expose['_auto_contacted'] = True
+
+                        # Store page source for archiving (optional feature)
+                        try:
+                            if self.bot.driver:
+                                expose['_archive_html'] = self.bot.driver.page_source
+                                expose['_archive_url'] = url
+                        except Exception as e:
+                            logger.warning(f"Could not capture page source for archiving: {e}")
 
                         # Mark title as contacted to prevent duplicates across platforms
                         if self.id_watch:
