@@ -75,10 +75,13 @@ class TelegramArchiveHandler:
             archive_id if successful, None otherwise
         """
         try:
-            # Generate unique archive ID
+            # Generate unique archive ID (short for Telegram's 64 byte callback_data limit)
+            # Format: timestamp_hash (e.g., "20251210_205720_a3f9")
+            import hashlib
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            listing_id = archive_data['metadata'].get('url', '').split('/')[-1]
-            archive_id = f"{timestamp}_{listing_id}"
+            url = archive_data['metadata'].get('url', '')
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]  # First 8 chars of hash
+            archive_id = f"{timestamp}_{url_hash}"
 
             # Store archive
             self.archives[archive_id] = {
