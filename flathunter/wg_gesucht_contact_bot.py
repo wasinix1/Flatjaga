@@ -651,93 +651,69 @@ class WgGesuchtContactBot:
         return False
 
     def _init_driver(self):
-        """
-        Create Selenium driver - uses normal chromedriver by default.
+        """Create Selenium driver with optional stealth mode."""
+        # If stealth mode is enabled, try to use undetected-chromedriver
+        if self.stealth_mode:
+            try:
+                import undetected_chromedriver as uc
+                logger.info("Using undetected-chromedriver for stealth mode")
 
-        Normal chromedriver is preferred for session validation and general use.
-        Stealth mode (undetected-chromedriver) is available as a fallback option
-        if explicitly enabled via stealth_mode parameter.
-        """
-        # Use normal chromedriver by default (preferred for session validation)
-        if not self.stealth_mode:
-            logger.info("Initializing normal Chrome driver (recommended)")
-            chrome_options = Options()
-            if self.headless:
-                chrome_options.add_argument('--headless=new')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
+                # Use undetected-chromedriver
+                options = uc.ChromeOptions()
+                if self.headless:
+                    options.add_argument('--headless=new')
 
-            # Use webdriver-manager for auto version matching
-            from selenium.webdriver.chrome.service import Service
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            logger.info("Chrome driver initialized (normal mode, auto-matched version)")
-            return
+                # Additional stealth options
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_argument('--disable-dev-shm-usage')
+                options.add_argument('--no-sandbox')
+                options.add_argument('--disable-web-security')
+                options.add_argument('--disable-features=IsolateOrigins,site-per-process')
 
-        # Stealth mode fallback - only if explicitly enabled
-        logger.info("Stealth mode enabled - attempting to use undetected-chromedriver")
-        try:
-            import undetected_chromedriver as uc
-            logger.info("Using undetected-chromedriver (fallback option)")
+                # Random window size to avoid fingerprinting
+                window_sizes = [(1920, 1080), (1366, 768), (1536, 864), (1440, 900)]
+                width, height = random.choice(window_sizes)
+                options.add_argument(f'--window-size={width},{height}')
 
-            # Use undetected-chromedriver
-            options = uc.ChromeOptions()
-            if self.headless:
-                options.add_argument('--headless=new')
+                self.driver = uc.Chrome(options=options, version_main=None)
 
-            # Additional stealth options
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-web-security')
-            options.add_argument('--disable-features=IsolateOrigins,site-per-process')
+                # Additional JavaScript-level anti-detection
+                self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                    "userAgent": self.driver.execute_script("return navigator.userAgent").replace('Headless', '')
+                })
 
-            # Random window size to avoid fingerprinting
-            window_sizes = [(1920, 1080), (1366, 768), (1536, 864), (1440, 900)]
-            width, height = random.choice(window_sizes)
-            options.add_argument(f'--window-size={width},{height}')
+                # Remove webdriver property
+                self.driver.execute_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                """)
 
-            self.driver = uc.Chrome(options=options, version_main=None)
+                logger.info(f"Undetected Chrome driver initialized ({width}x{height})")
+                return
 
-            # Additional JavaScript-level anti-detection
-            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": self.driver.execute_script("return navigator.userAgent").replace('Headless', '')
-            })
+            except ImportError:
+                logger.warning("undetected_chromedriver not installed, falling back to regular Chrome")
+                logger.warning("Install with: pip install undetected-chromedriver")
+                logger.warning("Stealth mode will use regular Chrome with basic anti-detection")
 
-            # Remove webdriver property
-            self.driver.execute_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
+        # Regular Chrome driver (or fallback from stealth mode)
+        chrome_options = Options()
+        if self.headless:
+            chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-            logger.info(f"Undetected Chrome driver initialized ({width}x{height})")
-
-        except ImportError:
-            logger.warning("undetected_chromedriver not installed, falling back to regular Chrome")
-            logger.warning("Install with: pip install undetected-chromedriver")
-            logger.warning("Using regular Chrome with basic options instead")
-
-            # Fall back to regular Chrome
-            chrome_options = Options()
-            if self.headless:
-                chrome_options.add_argument('--headless=new')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-
-            # Use webdriver-manager for auto version matching
-            from selenium.webdriver.chrome.service import Service
-            from webdriver_manager.chrome import ChromeDriverManager
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            logger.info("Chrome driver initialized (stealth fallback mode, auto-matched version)")
+        # Use webdriver-manager for auto version matching
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        mode = "stealth (fallback)" if self.stealth_mode else "regular"
+        logger.info(f"Chrome driver initialized ({mode} mode, auto-matched version)")
 
     def load_cookies(self):
         """Load saved session cookies. Returns True if session is valid."""

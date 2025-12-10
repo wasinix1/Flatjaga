@@ -52,8 +52,8 @@ class WgGesuchtContactProcessor:
             wg_gesucht_headless: bool - Run in headless mode (default True)
             wg_gesucht_delay_min: float - Minimum delay between actions (default 0.5)
             wg_gesucht_delay_max: float - Maximum delay between actions (default 1.5)
-            wg_gesucht_stealth_mode: bool - Enable stealth mode with undetected-chromedriver as fallback (default False)
-                                            Note: Session validation always uses normal chromedriver regardless of this setting
+            wg_gesucht_stealth_mode: bool - Enable stealth mode with undetected-chromedriver (default False)
+                                            Note: Session validation always uses normal chromedriver
         """
         self.config = config
         self.bot = None
