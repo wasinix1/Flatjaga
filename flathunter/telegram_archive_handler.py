@@ -86,7 +86,7 @@ class TelegramArchiveHandler:
             # Store archive
             self.archives[archive_id] = {
                 'archive_data': archive_data,
-                'chat_id': chat_id,
+                'chat_id': int(chat_id),  # Ensure stored as int for comparison
                 'created_at': datetime.now().isoformat()
             }
 
@@ -212,8 +212,12 @@ class TelegramArchiveHandler:
                 return
 
             # Verify chat_id matches (security check)
-            if archive['chat_id'] != chat_id:
-                logger.warning(f"Chat ID mismatch for archive {archive_id}: {chat_id} != {archive['chat_id']}")
+            # Convert both to int for comparison (Telegram chat_id is int)
+            stored_chat_id = int(archive['chat_id']) if archive['chat_id'] else 0
+            current_chat_id = int(chat_id) if chat_id else 0
+
+            if stored_chat_id != current_chat_id:
+                logger.warning(f"Chat ID mismatch for archive {archive_id}: {current_chat_id} != {stored_chat_id}")
                 self._answer_callback(callback_id, "⚠️ Zugriff verweigert")
                 return
 
