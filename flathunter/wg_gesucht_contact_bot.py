@@ -552,9 +552,36 @@ class WgGesuchtContactBot:
                     if not is_enabled:
                         logger.info(f"        ⚠ Element not enabled, but will try to click anyway")
 
-                    # Try to click with verbose logging
-                    logger.info(f"        → Attempting to click element...")
-                    if self._click_element_verbose(element, "template button"):
+                    # Try sophisticated JS click with full event dispatch
+                    logger.info(f"        → Attempting sophisticated JS click (full events)...")
+                    try:
+                        # Dispatch complete mouse event sequence with proper properties
+                        self.driver.execute_script("""
+                            var element = arguments[0];
+                            var rect = element.getBoundingClientRect();
+                            var centerX = rect.left + rect.width / 2;
+                            var centerY = rect.top + rect.height / 2;
+
+                            // Full event sequence: mousedown → mouseup → click
+                            ['mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup', 'click'].forEach(function(eventType) {
+                                var event = new MouseEvent(eventType, {
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true,
+                                    clientX: centerX,
+                                    clientY: centerY,
+                                    screenX: centerX + window.screenX,
+                                    screenY: centerY + window.screenY,
+                                    button: 0,
+                                    buttons: eventType === 'mousedown' ? 1 : 0
+                                });
+                                element.dispatchEvent(event);
+                            });
+                        """, element)
+
+                        logger.info(f"        ✓ Sophisticated JS click dispatched")
+                        time.sleep(0.2)  # Let events propagate
+
                         # Verify modal opened
                         logger.info(f"        → Verifying modal opened...")
                         if self._verify_modal_opened(timeout=3):
@@ -563,8 +590,8 @@ class WgGesuchtContactBot:
                         else:
                             logger.warning(f"        ✗ Click succeeded but modal didn't open")
                             logger.info(f"        → Continuing to next strategy...")
-                    else:
-                        logger.warning(f"        ✗ All click strategies failed for this element")
+                    except Exception as e:
+                        logger.warning(f"        ✗ Sophisticated click failed: {type(e).__name__}")
                         logger.info(f"        → Continuing to next strategy...")
 
                 except NoSuchElementException:
@@ -583,7 +610,7 @@ class WgGesuchtContactBot:
 
                 if is_displayed:
                     logger.info(f"      → Clicking dropdown button...")
-                    if self._click_element_verbose(dropdown_btn, "conversation controls dropdown"):
+                    if self._click_element(dropdown_btn, "dropdown"):
                         logger.info(f"      ✓ Dropdown menu opened")
                         self._random_delay(action_type="micro")
 
@@ -594,7 +621,7 @@ class WgGesuchtContactBot:
                                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a.message_template_btn"))
                             )
                             logger.info(f"      ✓ Template link found, clicking...")
-                            if self._click_element_verbose(template_link, "template link"):
+                            if self._click_element(template_link, "template link"):
                                 # Verify modal opened
                                 logger.info(f"      → Verifying modal opened...")
                                 if self._verify_modal_opened(timeout=3):
@@ -1048,7 +1075,36 @@ class WgGesuchtContactBot:
 
                 except Exception as e:
                     logger.warning(f"  ⚠ Modal template insertion failed: {e}")
-                    logger.warning("  → Will try direct fill fallback...")
+                    logger.warning("  → Closing modal before fallback...")
+
+                    # Close modal to prevent overlay conflicts
+                    try:
+                        # Try common close button selectors
+                        close_selectors = [
+                            (By.XPATH, "//button[contains(@class, 'close')]"),
+                            (By.XPATH, "//span[@aria-hidden='true' and contains(text(), '×')]"),
+                            (By.XPATH, "//button[contains(text(), '×')]"),
+                            (By.CSS_SELECTOR, "button.close"),
+                        ]
+
+                        modal_closed = False
+                        for selector_type, selector_value in close_selectors:
+                            try:
+                                close_btn = self.driver.find_element(selector_type, selector_value)
+                                if close_btn.is_displayed():
+                                    close_btn.click()
+                                    time.sleep(0.3)  # Let modal close animation complete
+                                    logger.info(f"  ✓ Closed modal")
+                                    modal_closed = True
+                                    break
+                            except:
+                                continue
+
+                        if not modal_closed:
+                            logger.debug(f"  → No close button found (modal may auto-close)")
+
+                    except Exception as close_error:
+                        logger.debug(f"  → Could not close modal: {close_error} (proceeding anyway)")
 
             # If modal failed OR template insertion failed, use direct fill fallback
             if not message_filled:
