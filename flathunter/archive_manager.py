@@ -137,42 +137,25 @@ class ArchiveManager:
         try:
             soup = BeautifulSoup(page_source, 'html.parser')
 
-            # Extract images - WG-Gesucht specific
+            # Extract images - WG-Gesucht specific (only apartment photos)
             images = []
 
-            # Strategy 1: sp-image class with data attributes (preferred for quality)
+            # Only extract sp-image class (apartment gallery photos)
             gallery_imgs = soup.find_all('img', class_='sp-image')
             for img in gallery_imgs:
-                # Prefer data-large (best quality), fallback to data-default or src
-                src = (img.get('data-large') or
-                       img.get('data-default') or
-                       img.get('data-medium') or
-                       img.get('src') or
-                       img.get('data-src', ''))
-                if src and src.startswith('http'):
+                # Only use data-large for best quality
+                src = img.get('data-large', '')
+
+                # Filter out maps, icons, and other non-photo images
+                if src and src.startswith('http') and '/media/up/' in src:
+                    # Only apartment photos have /media/up/ in the URL
                     images.append(src)
-
-            # Strategy 2: Gallery images with generic class
-            if not images:
-                gallery_imgs = soup.find_all('img', class_=re.compile(r'gallery', re.I))
-                for img in gallery_imgs:
-                    src = img.get('src', '') or img.get('data-src', '')
-                    if src and src.startswith('http'):
-                        images.append(src)
-
-            # Strategy 3: All images with wg-gesucht domain
-            if not images:
-                all_imgs = soup.find_all('img')
-                for img in all_imgs:
-                    src = img.get('src', '') or img.get('data-src', '')
-                    if 'wg-gesucht' in src and src.startswith('http'):
-                        images.append(src)
 
             # Remove duplicates while preserving order
             seen = set()
             images = [x for x in images if not (x in seen or seen.add(x))]
 
-            logger.info(f"Extracted {len(images)} images from WG-Gesucht listing")
+            logger.info(f"Extracted {len(images)} apartment photos from WG-Gesucht listing")
 
             # Extract description - WG-Gesucht uses freitext divs with <p> tags
             description = ""
