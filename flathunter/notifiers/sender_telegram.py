@@ -239,6 +239,7 @@ class SenderTelegram(Processor, Notifier):
         try:
             # Send images in chunks of 10 (Telegram limit)
             image_chunks = list(chunk_list(images, 10))
+            sent_count = 0
 
             for idx, chunk in enumerate(image_chunks):
                 payload = {
@@ -267,9 +268,13 @@ class SenderTelegram(Processor, Notifier):
                         response=response,
                         chat_id=str(chat_id)
                     )
-                    return
+                    # Continue to next chunk instead of stopping
+                    continue
+                else:
+                    sent_count += len(chunk)
+                    logger.debug(f"Sent chunk {idx+1}/{len(image_chunks)} ({len(chunk)} images)")
 
-            logger.info(f"Sent archive with {len(images)} images in {len(image_chunks)} batches")
+            logger.info(f"Sent archive with {sent_count}/{len(images)} images in {len(image_chunks)} batches")
 
         except Exception as e:
             logger.error(f"Error sending archive reply: {e}", exc_info=True)
