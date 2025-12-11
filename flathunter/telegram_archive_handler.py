@@ -282,42 +282,48 @@ class TelegramArchiveHandler:
             description = archive_data.get('description', '')
             metadata = archive_data.get('metadata', {})
 
-            # Build message text
-            message_parts = []
+            # Build short caption for images (limited to 1024 chars by Telegram)
+            caption = "📦 Listing Archiv"
 
-            # Add metadata header
-            message_parts.append("📦 Listing Archiv")
-            message_parts.append("")
-
-            # Add description
             if description:
-                # Truncate if too long (Telegram has 4096 char limit for captions)
-                max_desc_len = 3000
-                if len(description) > max_desc_len:
-                    description = description[:max_desc_len] + "... (gekürzt)"
+                # Try to fit description in caption (1000 char limit to leave room for header)
+                if len(description) <= 950:
+                    caption += f"\n\n📝 {description}"
+                else:
+                    # Description too long for caption - will send separately
+                    caption += "\n\n📝 Beschreibung wird separat gesendet..."
 
-                message_parts.append("📝 Beschreibung:")
-                message_parts.append(description)
-            else:
-                message_parts.append("📝 Keine Beschreibung verfügbar")
-
-            message_text = "\n".join(message_parts)
-
-            # Send images and description
+            # Send images with short caption
             if images:
                 self.sender_telegram.send_archive_reply(
                     chat_id=chat_id,
                     reply_to_message_id=reply_to_message_id,
                     images=images,
-                    description_text=message_text
+                    description_text=caption
                 )
                 logger.info(f"Sent archive with {len(images)} images to chat {chat_id}")
-            else:
-                # No images, just send description as text
+
+            # Send full description as separate message if it's too long for caption
+            if description and len(description) > 950:
+                full_desc_text = f"📝 Vollständige Beschreibung:\n\n{description}"
                 self.sender_telegram.send_text_reply(
                     chat_id=chat_id,
                     reply_to_message_id=reply_to_message_id,
-                    text=message_text
+                    text=full_desc_text
+                )
+                logger.info(f"Sent full description ({len(description)} chars) as separate message")
+
+            # If no images, just send description as text
+            if not images:
+                if description:
+                    text = f"📦 Listing Archiv\n\n📝 {description}"
+                else:
+                    text = "📦 Listing Archiv\n\n📝 Keine Beschreibung verfügbar"
+
+                self.sender_telegram.send_text_reply(
+                    chat_id=chat_id,
+                    reply_to_message_id=reply_to_message_id,
+                    text=text
                 )
                 logger.info(f"Sent archive (no images) to chat {chat_id}")
 
