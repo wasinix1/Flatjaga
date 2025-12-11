@@ -52,7 +52,8 @@ class WillhabenContactProcessor:
         """
         try:
             from selenium.webdriver.common.by import By
-            from selenium.webdriver.common.keys import Keys
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
             from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
             logger.debug("Loading all gallery images for archiving...")
@@ -61,32 +62,68 @@ class WillhabenContactProcessor:
             current_url = self.bot.driver.current_url
             if listing_url not in current_url:
                 self.bot.driver.get(listing_url)
-                time.sleep(1)
+                time.sleep(1.5)
 
-            # Find next button for gallery and click it multiple times to load all images
-            # Willhaben uses Flickity carousel library
+            # Wait for gallery container to be present (sign that Flickity is initializing)
+            try:
+                WebDriverWait(self.bot.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, '.flickity-viewport, [class*="gallery"], [class*="carousel"]'))
+                )
+                time.sleep(1)  # Give Flickity time to fully initialize
+                logger.debug("Gallery container found, proceeding with image loading")
+            except TimeoutException:
+                logger.warning("Gallery container not found - skipping image loading")
+                return
+
+            # Click through gallery using JavaScript (more reliable than Selenium click)
             clicks = 0
-            max_clicks = 30  # Safety limit (more than enough for 22 images)
+            max_clicks = 30  # Safety limit
+            consecutive_failures = 0
+            max_consecutive_failures = 3
 
-            while clicks < max_clicks:
+            while clicks < max_clicks and consecutive_failures < max_consecutive_failures:
                 try:
-                    # Look for Flickity next button (specific to Willhaben's carousel)
-                    next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button.flickity-prev-next-button.next')
+                    # Find next button - try multiple selectors
+                    next_button = None
+                    selectors = [
+                        'button.flickity-prev-next-button.next',
+                        'button.flickity-button.next',
+                        'button[aria-label*="Next" i]',
+                        '.flickity-prev-next-button.next'
+                    ]
 
-                    if next_button and next_button.is_displayed() and next_button.is_enabled():
-                        next_button.click()
-                        time.sleep(0.3)  # Brief pause for lazy load
-                        clicks += 1
-                    else:
-                        # Button not clickable - probably at the end
+                    for selector in selectors:
+                        try:
+                            next_button = self.bot.driver.find_element(By.CSS_SELECTOR, selector)
+                            if next_button:
+                                break
+                        except NoSuchElementException:
+                            continue
+
+                    if not next_button:
+                        logger.debug(f"No next button found after {clicks} clicks")
                         break
 
-                except (NoSuchElementException, TimeoutException):
-                    # No next button found - we're done
-                    break
+                    # Check if button is visible and enabled
+                    if not next_button.is_displayed():
+                        logger.debug(f"Next button not visible after {clicks} clicks")
+                        break
+
+                    # Use JavaScript click (more reliable for complex UI)
+                    self.bot.driver.execute_script("arguments[0].click();", next_button)
+                    time.sleep(0.4)  # Wait for transition and lazy load
+                    clicks += 1
+                    consecutive_failures = 0  # Reset failure counter on success
+
+                    if clicks % 5 == 0:
+                        logger.debug(f"Gallery scroll progress: {clicks} clicks")
+
+                except NoSuchElementException:
+                    consecutive_failures += 1
+                    logger.debug(f"Next button disappeared (failure {consecutive_failures}/{max_consecutive_failures})")
                 except Exception as e:
-                    logger.debug(f"Gallery scroll stopped: {e}")
-                    break
+                    consecutive_failures += 1
+                    logger.debug(f"Gallery scroll error: {e} (failure {consecutive_failures}/{max_consecutive_failures})")
 
             logger.debug(f"Clicked through gallery {clicks} times - all images should be loaded")
             time.sleep(0.5)  # Final wait for any pending loads
