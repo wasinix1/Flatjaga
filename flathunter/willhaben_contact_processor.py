@@ -64,32 +64,21 @@ class WillhabenContactProcessor:
                 time.sleep(1)
 
             # Find next button for gallery and click it multiple times to load all images
-            # Willhaben uses a carousel - clicking next loads more images
+            # Willhaben uses Flickity carousel library
             clicks = 0
             max_clicks = 30  # Safety limit (more than enough for 22 images)
 
             while clicks < max_clicks:
                 try:
-                    # Look for next button (various possible selectors)
-                    next_button = None
-                    try:
-                        # Common carousel next button patterns
-                        next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="next" i]')
-                    except:
-                        try:
-                            next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button[class*="next" i]')
-                        except:
-                            try:
-                                next_button = self.bot.driver.find_element(By.XPATH, "//button[contains(@class, 'flickity')]")
-                            except:
-                                pass
+                    # Look for Flickity next button (specific to Willhaben's carousel)
+                    next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button.flickity-prev-next-button.next')
 
-                    if next_button and next_button.is_displayed():
+                    if next_button and next_button.is_displayed() and next_button.is_enabled():
                         next_button.click()
                         time.sleep(0.3)  # Brief pause for lazy load
                         clicks += 1
                     else:
-                        # No more next button - probably at the end
+                        # Button not clickable - probably at the end
                         break
 
                 except (NoSuchElementException, TimeoutException):

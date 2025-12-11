@@ -115,17 +115,10 @@ def test_archive_for_url(listing_url: str, config_path: str = None):
 
                 while clicks < max_clicks:
                     try:
-                        # Try to find and click next button
-                        next_button = None
-                        try:
-                            next_button = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="next" i]')
-                        except:
-                            try:
-                                next_button = driver.find_element(By.CSS_SELECTOR, 'button[class*="next" i]')
-                            except:
-                                pass
+                        # Look for Flickity next button (Willhaben's carousel library)
+                        next_button = driver.find_element(By.CSS_SELECTOR, 'button.flickity-prev-next-button.next')
 
-                        if next_button and next_button.is_displayed():
+                        if next_button and next_button.is_displayed() and next_button.is_enabled():
                             next_button.click()
                             time.sleep(0.3)
                             clicks += 1
