@@ -240,8 +240,12 @@ class SenderTelegram(Processor, Notifier):
             # Send images in chunks of 10 (Telegram limit)
             image_chunks = list(chunk_list(images, 10))
             sent_count = 0
+            max_retries = 3
 
             for idx, chunk in enumerate(image_chunks):
+                chunk_sent = False
+
+                # Build payload once for all retry attempts
                 payload = {
                     'chat_id': str(chat_id),
                     'reply_to_message_id': reply_to_message_id,
@@ -259,20 +263,40 @@ class SenderTelegram(Processor, Notifier):
 
                 payload['media'] = json.dumps(media)
 
-                response = requests.post(self.__media_group_url, data=payload, timeout=30)
+                # Retry logic with exponential backoff
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(self.__media_group_url, data=payload, timeout=30)
 
-                if response.status_code != 200:
-                    logger.warning(f"Error sending archive media group (chunk {idx+1}/{len(image_chunks)}): {response.status_code}")
-                    self.__handle_error(
-                        "When sending archive media group, we got an error.",
-                        response=response,
-                        chat_id=str(chat_id)
-                    )
-                    # Continue to next chunk instead of stopping
-                    continue
-                else:
-                    sent_count += len(chunk)
-                    logger.debug(f"Sent chunk {idx+1}/{len(image_chunks)} ({len(chunk)} images)")
+                        if response.status_code == 200:
+                            sent_count += len(chunk)
+                            chunk_sent = True
+                            logger.debug(f"Sent chunk {idx+1}/{len(image_chunks)} ({len(chunk)} images)")
+                            break  # Success - move to next chunk
+                        else:
+                            # Log error
+                            logger.warning(f"Chunk {idx+1}/{len(image_chunks)} failed (attempt {attempt+1}/{max_retries}): {response.status_code}")
+
+                            # Handle rate limiting
+                            if response.status_code == 429:
+                                retry_after = response.json().get('parameters', {}).get('retry_after', 0)
+                                wait_time = max(retry_after, 2 ** attempt)  # Use retry_after or exponential backoff
+                                logger.info(f"Rate limited - waiting {wait_time}s before retry")
+                                time.sleep(wait_time)
+                            elif attempt < max_retries - 1:
+                                # Exponential backoff for other errors: 1s, 2s, 4s
+                                wait_time = 2 ** attempt
+                                logger.debug(f"Retrying in {wait_time}s...")
+                                time.sleep(wait_time)
+
+                    except requests.exceptions.RequestException as e:
+                        logger.warning(f"Network error sending chunk {idx+1} (attempt {attempt+1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            time.sleep(2 ** attempt)
+
+                # Log if all retries failed
+                if not chunk_sent:
+                    logger.error(f"Failed to send chunk {idx+1}/{len(image_chunks)} after {max_retries} attempts - skipping")
 
             logger.info(f"Sent archive with {sent_count}/{len(images)} images in {len(image_chunks)} batches")
 
