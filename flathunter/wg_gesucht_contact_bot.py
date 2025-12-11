@@ -762,8 +762,20 @@ class WgGesuchtContactBot:
             
             # Refresh to apply cookies
             self.driver.get(WG_GESUCHT_URL)
-            time.sleep(0.3)  # Reduced from 1s for performance
-            
+
+            # Wait for page to fully load before validating session
+            # This ensures cookies are fully applied and DOM is ready
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    lambda driver: driver.execute_script('return document.readyState') == 'complete'
+                )
+            except TimeoutException:
+                logger.warning("Page did not finish loading after applying cookies")
+                return False
+
+            # Additional small delay for cookies to fully propagate
+            time.sleep(0.5)
+
             # Validate session
             if self._validate_session():
                 return True
