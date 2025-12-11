@@ -68,32 +68,18 @@ class ArchiveManager:
         try:
             soup = BeautifulSoup(page_source, 'html.parser')
 
-            # Extract images - multiple strategies
+            # Extract images - use URL pattern matching (works even with lazy-loaded images)
             images = []
 
-            # Strategy 1: Find carousel images with data-testid
-            img_elements = soup.find_all('img', {'data-testid': re.compile(r'image-\d+')})
-            for img in img_elements:
-                src = img.get('src', '')
-                if src and src.startswith('http'):
+            # Get ALL img tags with cache.willhaben.at URLs (includes lazy-loaded)
+            all_imgs = soup.find_all('img')
+            for img in all_imgs:
+                # Check both src and data-src (for lazy loading)
+                src = img.get('src', '') or img.get('data-src', '')
+
+                # Only willhaben apartment images from cache domain
+                if src and 'cache.willhaben.at/mmo' in src:
                     images.append(src)
-
-            # Strategy 2: Find images in carousel cells
-            if not images:
-                carousel_imgs = soup.find_all('img', class_=re.compile(r'(carousel|gallery)', re.I))
-                for img in carousel_imgs:
-                    src = img.get('src', '')
-                    if src and src.startswith('http'):
-                        images.append(src)
-
-            # Strategy 3: All images in page (filter by URL pattern)
-            if not images:
-                all_imgs = soup.find_all('img')
-                for img in all_imgs:
-                    src = img.get('src', '')
-                    # Willhaben images typically from cache.willhaben.at
-                    if 'cache.willhaben.at' in src or 'willhaben.at/mmo' in src:
-                        images.append(src)
 
             # Remove duplicates while preserving order
             seen = set()

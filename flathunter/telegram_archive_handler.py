@@ -76,12 +76,15 @@ class TelegramArchiveHandler:
         """
         try:
             # Generate unique archive ID (short for Telegram's 64 byte callback_data limit)
-            # Format: timestamp_hash (e.g., "20251210_205720_a3f9")
+            # Format: timestamp_hash_chatid (e.g., "20251210_205720_a3f9_c123")
+            # Must include chat_id to prevent overwrites when multiple receivers exist
             import hashlib
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             url = archive_data['metadata'].get('url', '')
-            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]  # First 8 chars of hash
-            archive_id = f"{timestamp}_{url_hash}"
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:6]  # 6 chars of URL hash
+            # Use absolute value for chat_id (groups have negative IDs)
+            chat_hash = hashlib.md5(str(chat_id).encode()).hexdigest()[:4]  # 4 chars of chat hash
+            archive_id = f"{timestamp}_{url_hash}_{chat_hash}"
 
             # Store archive
             self.archives[archive_id] = {
