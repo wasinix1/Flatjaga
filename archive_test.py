@@ -104,6 +104,40 @@ def test_archive_for_url(listing_url: str, config_path: str = None):
             driver.get(listing_url)
             time.sleep(3)  # Wait for page to load
 
+            # For Willhaben: Scroll through gallery to load all images
+            if 'willhaben.at' in listing_url:
+                print(f"Scrolling through Willhaben gallery to load all images...")
+                from selenium.webdriver.common.by import By
+                from selenium.common.exceptions import NoSuchElementException
+
+                clicks = 0
+                max_clicks = 30
+
+                while clicks < max_clicks:
+                    try:
+                        # Try to find and click next button
+                        next_button = None
+                        try:
+                            next_button = driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="next" i]')
+                        except:
+                            try:
+                                next_button = driver.find_element(By.CSS_SELECTOR, 'button[class*="next" i]')
+                            except:
+                                pass
+
+                        if next_button and next_button.is_displayed():
+                            next_button.click()
+                            time.sleep(0.3)
+                            clicks += 1
+                        else:
+                            break
+
+                    except (NoSuchElementException, Exception):
+                        break
+
+                print(f"✓ Clicked through gallery {clicks} times")
+                time.sleep(0.5)
+
             page_source = driver.page_source
             print(f"✓ Page loaded ({len(page_source)} bytes)")
 
