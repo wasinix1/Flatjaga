@@ -305,7 +305,8 @@ class SenderTelegram(Processor, Notifier):
 
     def send_text_reply(self, chat_id: int, reply_to_message_id: int, text: str):
         """
-        Send a text message as reply to another message
+        Send a text message as reply to another message.
+        Automatically splits long messages into chunks if they exceed Telegram's 4096 char limit.
 
         Args:
             chat_id: Telegram chat ID
@@ -316,18 +317,78 @@ class SenderTelegram(Processor, Notifier):
             None
         """
         try:
-            payload = {
-                'chat_id': str(chat_id),
-                'text': text,
-                'reply_to_message_id': reply_to_message_id
-            }
+            # Telegram message limit is 4096 characters
+            max_length = 4000  # Use 4000 to be safe
 
-            response = requests.post(self.__text_message_url, data=payload, timeout=30)
+            # If text fits in one message, send it
+            if len(text) <= max_length:
+                payload = {
+                    'chat_id': str(chat_id),
+                    'text': text,
+                    'reply_to_message_id': reply_to_message_id
+                }
 
-            if response.status_code != 200:
-                logger.warning(f"Failed to send text reply: {response.status_code}")
-                self.__handle_error("When sending text reply, we got an error.",
-                    response, chat_id)
+                response = requests.post(self.__text_message_url, data=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.warning(f"Failed to send text reply: {response.status_code}")
+                    self.__handle_error("When sending text reply, we got an error.",
+                        response, chat_id)
+                return
+
+            # Text is too long - split into chunks
+            chunks = []
+            remaining = text
+
+            while remaining:
+                if len(remaining) <= max_length:
+                    chunks.append(remaining)
+                    break
+
+                # Find a good break point (newline, period, or space)
+                chunk = remaining[:max_length]
+                break_point = max_length
+
+                # Try to break at newline
+                last_newline = chunk.rfind('\n')
+                if last_newline > max_length * 0.7:  # At least 70% through
+                    break_point = last_newline + 1
+                else:
+                    # Try to break at period
+                    last_period = chunk.rfind('. ')
+                    if last_period > max_length * 0.7:
+                        break_point = last_period + 2
+                    else:
+                        # Break at last space
+                        last_space = chunk.rfind(' ')
+                        if last_space > max_length * 0.5:  # At least 50% through
+                            break_point = last_space + 1
+
+                chunks.append(remaining[:break_point])
+                remaining = remaining[break_point:]
+
+            # Send chunks
+            logger.info(f"Splitting long message ({len(text)} chars) into {len(chunks)} chunks")
+
+            for i, chunk in enumerate(chunks):
+                payload = {
+                    'chat_id': str(chat_id),
+                    'text': chunk,
+                    'reply_to_message_id': reply_to_message_id
+                }
+
+                response = requests.post(self.__text_message_url, data=payload, timeout=30)
+
+                if response.status_code != 200:
+                    logger.warning(f"Failed to send text chunk {i+1}/{len(chunks)}: {response.status_code}")
+                    self.__handle_error(f"When sending text chunk {i+1}/{len(chunks)}, we got an error.",
+                        response, chat_id)
+                else:
+                    logger.debug(f"Sent text chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+
+                # Small delay between chunks to avoid rate limiting
+                if i < len(chunks) - 1:
+                    time.sleep(0.5)
 
         except Exception as e:
             logger.error(f"Error sending text reply: {e}", exc_info=True)
