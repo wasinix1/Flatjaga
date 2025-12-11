@@ -108,25 +108,57 @@ def test_archive_for_url(listing_url: str, config_path: str = None):
             if 'willhaben.at' in listing_url:
                 print(f"Scrolling through Willhaben gallery to load all images...")
                 from selenium.webdriver.common.by import By
-                from selenium.common.exceptions import NoSuchElementException
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.common.exceptions import NoSuchElementException, TimeoutException
+
+                # Wait for gallery container to be present
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, '.flickity-viewport, [class*="gallery"], [class*="carousel"]'))
+                    )
+                    time.sleep(1)  # Give Flickity time to fully initialize
+                    print("  Gallery container found")
+                except TimeoutException:
+                    print("  Warning: Gallery container not found")
 
                 clicks = 0
                 max_clicks = 30
+                consecutive_failures = 0
+                max_consecutive_failures = 3
 
-                while clicks < max_clicks:
+                while clicks < max_clicks and consecutive_failures < max_consecutive_failures:
                     try:
-                        # Look for Flickity next button (Willhaben's carousel library)
-                        next_button = driver.find_element(By.CSS_SELECTOR, 'button.flickity-prev-next-button.next')
+                        # Try multiple selectors
+                        next_button = None
+                        selectors = [
+                            'button.flickity-prev-next-button.next',
+                            'button.flickity-button.next',
+                            'button[aria-label*="Next" i]',
+                            '.flickity-prev-next-button.next'
+                        ]
 
-                        if next_button and next_button.is_displayed() and next_button.is_enabled():
-                            next_button.click()
-                            time.sleep(0.3)
-                            clicks += 1
-                        else:
+                        for selector in selectors:
+                            try:
+                                next_button = driver.find_element(By.CSS_SELECTOR, selector)
+                                if next_button:
+                                    break
+                            except NoSuchElementException:
+                                continue
+
+                        if not next_button or not next_button.is_displayed():
                             break
 
-                    except (NoSuchElementException, Exception):
-                        break
+                        # Use JavaScript click (more reliable)
+                        driver.execute_script("arguments[0].click();", next_button)
+                        time.sleep(0.4)
+                        clicks += 1
+                        consecutive_failures = 0
+
+                    except (NoSuchElementException, Exception) as e:
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive_failures:
+                            break
 
                 print(f"✓ Clicked through gallery {clicks} times")
                 time.sleep(0.5)
