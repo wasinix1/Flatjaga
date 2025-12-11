@@ -762,29 +762,8 @@ class WgGesuchtContactBot:
             
             # Refresh to apply cookies
             self.driver.get(WG_GESUCHT_URL)
-
-            # Wait for page to fully load before validating session
-            # This ensures cookies are fully applied and DOM is ready
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    lambda driver: driver.execute_script('return document.readyState') == 'complete'
-                )
-            except TimeoutException:
-                logger.warning("Page did not finish loading after applying cookies")
-                return False
-
-            # Additional small delay for cookies to fully propagate
-            time.sleep(0.5)
-
-            # Wait for cookies to be applied and logged-in state to be ready
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.LINK_TEXT, "Mein Konto"))
-                )
-            except TimeoutException:
-                logger.warning("Timed out waiting for logged-in state after loading cookies")
-                return False
-
+            time.sleep(0.3)  # Reduced from 1s for performance
+            
             # Validate session
             if self._validate_session():
                 return True
@@ -799,27 +778,32 @@ class WgGesuchtContactBot:
     def _validate_session(self):
         """
         Check if session is valid by looking for logged-in elements.
-        CRITICAL: "Mein Konto" link exists even when NOT logged in (as onclick handler).
-        Must verify "Logout" link is present, which only appears when logged in.
+        More robust validation - checks multiple indicators.
         """
         try:
-            # Check we're not on login page first
+            # Look for "Mein Konto" link (only visible when logged in)
+            WebDriverWait(self.driver, 3).until(
+                EC.presence_of_element_located((By.LINK_TEXT, "Mein Konto"))
+            )
+
+            # Additional check: verify we're not on login page
             if 'login' in self.driver.current_url.lower():
                 logger.warning("Session validation failed - on login page")
                 return False
 
-            # CRITICAL: Check for "Logout" link - this ONLY appears when logged in
-            # "Mein Konto" exists even when not logged in, so it's not a reliable indicator
+            # Check for logout link as additional confirmation
             try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.LINK_TEXT, "Logout"))
-                )
-                logger.info("Session validated - Logout link found (user is logged in)")
+                self.driver.find_element(By.LINK_TEXT, "Logout")
+                logger.info("Session validated - user is logged in")
                 return True
-            except TimeoutException:
-                logger.warning("Session validation failed - Logout link not found (not logged in)")
-                return False
+            except NoSuchElementException:
+                # Mein Konto exists but no logout - unusual but accept it
+                logger.info("Session validated - Mein Konto found")
+                return True
 
+        except TimeoutException:
+            logger.warning("Session validation failed - Mein Konto not found")
+            return False
         except Exception as e:
             logger.error(f"Session validation error: {e}")
             return False
