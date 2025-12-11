@@ -42,6 +42,69 @@ class WillhabenContactProcessor:
 
         return 0
 
+    def _load_all_gallery_images(self, listing_url):
+        """
+        Scroll through image gallery to trigger lazy-loading of all images.
+        This ensures all image URLs are in the DOM when we capture page_source.
+
+        Args:
+            listing_url: URL of the listing page
+        """
+        try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.common.keys import Keys
+            from selenium.common.exceptions import NoSuchElementException, TimeoutException
+
+            logger.debug("Loading all gallery images for archiving...")
+
+            # Navigate to listing if not already there
+            current_url = self.bot.driver.current_url
+            if listing_url not in current_url:
+                self.bot.driver.get(listing_url)
+                time.sleep(1)
+
+            # Find next button for gallery and click it multiple times to load all images
+            # Willhaben uses a carousel - clicking next loads more images
+            clicks = 0
+            max_clicks = 30  # Safety limit (more than enough for 22 images)
+
+            while clicks < max_clicks:
+                try:
+                    # Look for next button (various possible selectors)
+                    next_button = None
+                    try:
+                        # Common carousel next button patterns
+                        next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="next" i]')
+                    except:
+                        try:
+                            next_button = self.bot.driver.find_element(By.CSS_SELECTOR, 'button[class*="next" i]')
+                        except:
+                            try:
+                                next_button = self.bot.driver.find_element(By.XPATH, "//button[contains(@class, 'flickity')]")
+                            except:
+                                pass
+
+                    if next_button and next_button.is_displayed():
+                        next_button.click()
+                        time.sleep(0.3)  # Brief pause for lazy load
+                        clicks += 1
+                    else:
+                        # No more next button - probably at the end
+                        break
+
+                except (NoSuchElementException, TimeoutException):
+                    # No next button found - we're done
+                    break
+                except Exception as e:
+                    logger.debug(f"Gallery scroll stopped: {e}")
+                    break
+
+            logger.debug(f"Clicked through gallery {clicks} times - all images should be loaded")
+            time.sleep(0.5)  # Final wait for any pending loads
+
+        except Exception as e:
+            logger.warning(f"Could not scroll gallery (continuing anyway): {e}")
+
     def __init__(self, config, telegram_notifier=None, id_watch=None, session_manager=None):
         self.config = config
         self.bot = None
@@ -432,6 +495,8 @@ class WillhabenContactProcessor:
                         # Store page source for archiving (optional feature)
                         try:
                             if self.bot.driver:
+                                # Scroll through gallery to load all images before capturing HTML
+                                self._load_all_gallery_images(url)
                                 expose['_archive_html'] = self.bot.driver.page_source
                                 expose['_archive_url'] = url
                         except Exception as e:
@@ -567,6 +632,8 @@ class WillhabenContactProcessor:
                         # Store page source for archiving (optional feature)
                         try:
                             if self.bot.driver:
+                                # Scroll through gallery to load all images before capturing HTML
+                                self._load_all_gallery_images(url)
                                 expose['_archive_html'] = self.bot.driver.page_source
                                 expose['_archive_url'] = url
                         except Exception as e:
