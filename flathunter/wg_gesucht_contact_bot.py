@@ -762,8 +762,16 @@ class WgGesuchtContactBot:
             
             # Refresh to apply cookies
             self.driver.get(WG_GESUCHT_URL)
-            time.sleep(0.3)  # Reduced from 1s for performance
-            
+
+            # Wait for cookies to be applied and logged-in state to be ready
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.LINK_TEXT, "Mein Konto"))
+                )
+            except TimeoutException:
+                logger.warning("Timed out waiting for logged-in state after loading cookies")
+                return False
+
             # Validate session
             if self._validate_session():
                 return True
