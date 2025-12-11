@@ -79,6 +79,9 @@ class ArchiveManager:
 
                 # Only willhaben apartment images from cache domain
                 if src and 'cache.willhaben.at/mmo' in src:
+                    # Convert thumbnail URLs to full-size by removing _thumb suffix
+                    # e.g., 276_-2046106179_thumb.jpg → 276_-2046106179.jpg
+                    src = src.replace('_thumb.jpg', '.jpg').replace('_thumb.jpeg', '.jpeg')
                     images.append(src)
 
             # Remove duplicates while preserving order
