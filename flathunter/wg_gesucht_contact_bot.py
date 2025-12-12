@@ -777,13 +777,13 @@ class WgGesuchtContactBot:
     
     def _validate_session(self):
         """
-        Check if session is valid by looking for logged-in dropdown.
-        Uses dropdown-mini-content which ONLY exists when logged in.
+        Check if session is valid by looking for logged-in welcome text.
+        Uses welcome_text div which ONLY exists when logged in.
         """
         try:
-            # Primary check: logged-in dropdown (only exists when authenticated)
+            # Primary check: welcome text (only exists when authenticated)
             WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.dropdown-mini-content"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.welcome_text"))
             )
 
             # Additional check: verify we're not on login page
@@ -791,11 +791,11 @@ class WgGesuchtContactBot:
                 logger.warning("Session validation failed - on login page")
                 return False
 
-            logger.info("Session validated - logged-in dropdown found")
+            logger.info("Session validated - welcome text found")
             return True
 
         except TimeoutException:
-            logger.warning("Session validation failed - logged-in dropdown not found")
+            logger.warning("Session validation failed - welcome text not found")
             return False
         except Exception as e:
             logger.error(f"Session validation error: {e}")
@@ -843,7 +843,7 @@ class WgGesuchtContactBot:
 
         Flow (with 3 fallback methods):
         1. Visit listing page
-        2. Verify logged in state (check for logged-in dropdown, retry cookie load if needed)
+        2. Verify logged in state (check for welcome_text, retry cookie load if needed)
         3. Browse naturally (scroll, read)
         4. Discover contact URL: Method 1: Click visible button | Method 2: Extract href | Method 3: Construct URL
         5. Handle popups (security tips, cookies)
