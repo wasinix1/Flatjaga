@@ -777,13 +777,13 @@ class WgGesuchtContactBot:
     
     def _validate_session(self):
         """
-        Check if session is valid by looking for logged-in elements.
-        More robust validation - checks multiple indicators.
+        Check if session is valid by looking for logged-in dropdown.
+        Uses dropdown-mini-content which ONLY exists when logged in.
         """
         try:
-            # Look for "Mein Konto" link (only visible when logged in)
+            # Primary check: logged-in dropdown (only exists when authenticated)
             WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.LINK_TEXT, "Mein Konto"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.dropdown-mini-content"))
             )
 
             # Additional check: verify we're not on login page
@@ -791,18 +791,11 @@ class WgGesuchtContactBot:
                 logger.warning("Session validation failed - on login page")
                 return False
 
-            # Check for logout link as additional confirmation
-            try:
-                self.driver.find_element(By.LINK_TEXT, "Logout")
-                logger.info("Session validated - user is logged in")
-                return True
-            except NoSuchElementException:
-                # Mein Konto exists but no logout - unusual but accept it
-                logger.info("Session validated - Mein Konto found")
-                return True
+            logger.info("Session validated - logged-in dropdown found")
+            return True
 
         except TimeoutException:
-            logger.warning("Session validation failed - Mein Konto not found")
+            logger.warning("Session validation failed - logged-in dropdown not found")
             return False
         except Exception as e:
             logger.error(f"Session validation error: {e}")
@@ -849,10 +842,10 @@ class WgGesuchtContactBot:
         Mimics a user who discovered the URL pattern or inspected the page source.
 
         Flow (with 3 fallback methods):
-        1. Visit listing page and browse naturally (scroll, read)
-        2. Method 1: Find and click visible button if exists
-        3. Method 2: Extract href from hidden button, then navigate
-        4. Method 3: Construct URL manually as fallback
+        1. Visit listing page
+        2. Verify logged in state (check for logged-in dropdown, retry cookie load if needed)
+        3. Browse naturally (scroll, read)
+        4. Discover contact URL: Method 1: Click visible button | Method 2: Extract href | Method 3: Construct URL
         5. Handle popups (security tips, cookies)
         6. Select and insert template
         7. Send message
@@ -865,10 +858,6 @@ class WgGesuchtContactBot:
         Returns:
             True if successful, False otherwise
         """
-        if not self.session_valid:
-            logger.error("Session invalid - cannot contact listing")
-            raise SessionExpiredException("Session is not valid - re-login required")
-
         try:
             logger.info(f"Contacting listing: {listing_url}")
 
@@ -882,13 +871,28 @@ class WgGesuchtContactBot:
             self.driver.get(listing_url)
             self._random_delay(action_type="reading")
 
-            # Check for login redirect
-            if 'login' in self.driver.current_url.lower():
-                logger.error("Session expired - redirected to login")
-                self.session_valid = False
-                raise SessionExpiredException("Session expired")
+            # STEP 2: Verify logged in state AFTER loading page
+            logger.info("  → Verifying logged in state...")
+            if not self._validate_session():
+                logger.warning("  → Not logged in - retrying cookie/session loading...")
 
-            # STEP 2: Human browsing behavior - read and scroll
+                # Retry: reload cookies and validate again
+                if not self._load_cookies():
+                    logger.error("Session cookie reload failed")
+                    self.session_valid = False
+                    raise SessionExpiredException("Session cookie reload failed")
+
+                # Re-verify after cookie reload
+                if not self._validate_session():
+                    logger.error("Session validation failed after cookie reload")
+                    self.session_valid = False
+                    raise SessionExpiredException("Session validation failed after retry")
+
+                logger.info("  ✓ Session validated after cookie reload")
+            else:
+                logger.info("  ✓ Session validated - user is logged in")
+
+            # STEP 3: Human browsing behavior - read and scroll
             logger.info("  → Browsing listing (human behavior)...")
             if self.stealth_mode:
                 HumanBehavior.human_scroll(self.driver, distance=random.randint(250, 450))
@@ -915,7 +919,7 @@ class WgGesuchtContactBot:
             except TimeoutException:
                 pass
 
-            # STEP 3: STEALTH DISCOVERY - Find contact URL without clicking hidden button
+            # STEP 4: STEALTH DISCOVERY - Find contact URL without clicking hidden button
             logger.info("  → Discovering contact URL (3 methods with fallbacks)...")
 
             contact_url = None
@@ -1003,7 +1007,7 @@ class WgGesuchtContactBot:
 
             logger.info(f"  ✓ On contact page (via {discovery_method})")
 
-            # STEP 4: Handle security popup
+            # STEP 5: Handle security popup
             logger.info("  → Checking for security tips popup...")
             try:
                 confirm_btn = WebDriverWait(self.driver, 3).until(
@@ -1019,7 +1023,7 @@ class WgGesuchtContactBot:
             except Exception as e:
                 logger.warning(f"  → Security popup handling failed: {type(e).__name__}: {str(e)[:80]}")
 
-            # STEP 5: Fill message field (modal approach with direct fallback)
+            # STEP 6: Fill message field (modal approach with direct fallback)
             logger.info("  → Opening template modal...")
             modal_opened = self._find_and_click_template_button()
 
