@@ -59,7 +59,8 @@ class StealthDriver:
         options.add_argument('--lang=de-AT')
 
         # Disable automation flags
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        # Note: excludeSwitches removed for compatibility with older ChromeDriver versions
+        # options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
 
         try:
@@ -79,7 +80,8 @@ class StealthDriver:
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument(f'--user-agent={random.choice(self.USER_AGENTS)}')
             chrome_options.add_argument('--lang=de-AT')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            # Note: excludeSwitches removed for compatibility with older ChromeDriver versions
+            # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             self.driver = webdriver.Chrome(options=chrome_options)
             logger.info("Regular Chrome driver started (fallback)")
